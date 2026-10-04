@@ -1,6 +1,6 @@
 # 0003 — SSH/SFTP via golang.org/x/crypto/ssh + github.com/pkg/sftp
 
-Status: Accepted (2026-10)
+Status: Accepted (2026-10); host-key policy superseded-in-part by 0007 (2026-10)
 
 ## Context
 
@@ -15,7 +15,8 @@ as the file protocol client, one SFTP subsystem channel per SSH connection.
 Auth methods: password, public key (with optional passphrase),
 keyboard-interactive. Host keys are pinned: the user supplies the SHA256
 host key fingerprint at connection creation; a changed key aborts the
-connection and requires re-approval.
+connection and requires re-approval. (The fingerprint is now optional and
+captured on first successful use — see ADR 0007.)
 
 ## Consequences
 

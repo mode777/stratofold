@@ -174,6 +174,10 @@ func (s *Stack) seed(_ string) error {
 	conn.Set("auth_method", "password")
 	conn.Set("password", s.fixture.Password)
 	conn.Set("host_key_fingerprint", s.fixture.Fingerprint())
+	// The remote directory is the connection's default vdir root; the
+	// seeded vdirs below use it so the browser prefill path is exercised
+	// against the same value.
+	conn.Set("remote_dir", root)
 	if err := s.App.Save(conn); err != nil {
 		return fmt.Errorf("e2eharness: save connection: %w", err)
 	}
@@ -187,7 +191,7 @@ func (s *Stack) seed(_ string) error {
 		vd.Set("owner", owner.Id)
 		vd.Set("connection", conn.Id)
 		vd.Set("name", name)
-		vd.Set("root_path", root)
+		vd.Set("root_path", conn.GetString("remote_dir"))
 		vd.Set("is_public", public)
 		if err := s.App.Save(vd); err != nil {
 			return nil, err

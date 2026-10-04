@@ -99,7 +99,15 @@ func (r *Registry) Manager(recordID string) (*sshconn.Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	m, err := sshconn.NewManager(cfg, r.opts...)
+	// The capture hook is per-record: it persists the fingerprint the
+	// manager observes on its first successfully authenticated connect
+	// when the record had none (trust on first use, design D2/D3).
+	opts := make([]sshconn.Option, 0, len(r.opts)+1)
+	opts = append(opts, r.opts...)
+	opts = append(opts, sshconn.WithHostKeyCapture(func(fp string) {
+		r.persistFingerprint(recordID, fp)
+	}))
+	m, err := sshconn.NewManager(cfg, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("%w: connection record %s: %v", ssherr.ErrConfiguration, recordID, err)
 	}
@@ -114,6 +122,22 @@ func (r *Registry) Manager(recordID string) (*sshconn.Manager, error) {
 	}
 	r.mgrs[recordID] = m
 	return m, nil
+}
+
+// persistFingerprint writes a first-use captured fingerprint back to the
+// connection record. It uses a direct DB update (not app.Save) so the
+// record hooks do not fire: the OnRecordAfterUpdateSuccess invalidation
+// would otherwise tear down the manager that just pinned the key
+// (design D3). Only the fingerprint column is touched; secrets and all
+// other fields are left as they are.
+func (r *Registry) persistFingerprint(recordID, fp string) {
+	if fp == "" {
+		return
+	}
+	if _, err := r.app.DB().NewQuery("UPDATE connections SET host_key_fingerprint = {:fp} WHERE id = {:id}").
+		Bind(map[string]any{"fp": fp, "id": recordID}).Execute(); err != nil {
+		r.app.Logger().Error("connreg: persist captured host key fingerprint", "record", recordID, "error", err)
+	}
 }
 
 // Invalidate closes and drops the cached manager for the record, so

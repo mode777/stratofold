@@ -51,7 +51,7 @@ function vdirStore(initial: Record<string, unknown>[]) {
 }
 
 const CONNECTIONS = [
-  { id: "c1", label: "Box A", host: "a", port: 22, username: "u", auth_method: "password", host_key_fingerprint: "f" },
+  { id: "c1", label: "Box A", host: "a", port: 22, username: "u", auth_method: "password", host_key_fingerprint: "f", remote_dir: "/home/" },
   { id: "c2", label: "Box B", host: "b", port: 22, username: "u", auth_method: "password", host_key_fingerprint: "f" },
 ];
 
@@ -86,10 +86,41 @@ describe("vdirs management", () => {
 
     await waitFor(() => expect(store.calls.some((c) => c.method === "POST")).toBe(true));
     expect(store.calls.find((c) => c.method === "POST")!.body).toMatchObject({
+      owner: "u1",
       name: "NewVdir",
       root_path: "/data",
       connection: "c2",
       is_public: false,
+    });
+  });
+
+  it("prefills the root path from the selected connection's remote directory", async () => {
+    const store = vdirStore([]);
+    installPbMock([store.handler, (path) => (path.includes("/collections/connections/records") ? listOf(CONNECTIONS) : undefined)]);
+    renderPage();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("new-vdir"));
+    await user.type(screen.getByLabelText("Name"), "Prefilled");
+
+    // Selecting a connection with a remote directory seeds root_path.
+    await user.selectOptions(screen.getByTestId("v-connection"), "c1");
+    const root = screen.getByLabelText("Root path") as HTMLInputElement;
+    expect(root.value).toBe("/home/");
+
+    // A manual edit wins; switching to a connection without a remote
+    // directory leaves the typed value alone.
+    await user.clear(root);
+    await user.type(root, "/custom");
+    await user.selectOptions(screen.getByTestId("v-connection"), "c2");
+    expect(root.value).toBe("/custom");
+
+    await user.click(screen.getByTestId("vdir-save"));
+    await waitFor(() => expect(store.calls.some((c) => c.method === "POST")).toBe(true));
+    expect(store.calls.find((c) => c.method === "POST")!.body).toMatchObject({
+      owner: "u1",
+      root_path: "/custom",
+      connection: "c2",
     });
   });
 

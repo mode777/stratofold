@@ -247,6 +247,86 @@ func TestConnectionAuthzMatrix(t *testing.T) {
 	}
 }
 
+// TestConnectionOptionalFingerprintAndRemoteDir covers the record-shape
+// delta: a connection may omit the pinned fingerprint and carry a remote
+// directory, and existing pinned fingerprints survive the migration.
+func TestConnectionOptionalFingerprintAndRemoteDir(t *testing.T) {
+	s := testapp.Start(t)
+	owner := login(t, s, testapp.TestUserEmail, testapp.TestUserPassword)
+
+	// A connection without a fingerprint and with a remote directory.
+	st, out := doJSON(t, s, http.MethodPost, connBase, owner.token, map[string]any{
+		"owner":       owner.id,
+		"label":       "no-fp",
+		"host":        "127.0.0.1",
+		"port":        22,
+		"username":    "testuser",
+		"auth_method": "password",
+		"password":    secretPlaintexts[0],
+		"remote_dir":  "/home/",
+	})
+	bodyHasSecret(t, st, out, "create no-fp")
+	if st != http.StatusOK {
+		t.Fatalf("create without fingerprint: status %d body %v", st, out)
+	}
+	if got, _ := out["remote_dir"].(string); got != "/home/" {
+		t.Fatalf("create response remote_dir = %q, want /home/", got)
+	}
+	if fp, _ := out["host_key_fingerprint"].(string); fp != "" {
+		t.Fatalf("create response host_key_fingerprint = %q, want empty", fp)
+	}
+
+	// Reading it back returns the remote directory and an empty fingerprint.
+	st, out = doJSON(t, s, http.MethodGet, connBase+"/"+out["id"].(string), owner.token, nil)
+	if st != http.StatusOK {
+		t.Fatalf("view no-fp: status %d", st)
+	}
+	if got, _ := out["remote_dir"].(string); got != "/home/" {
+		t.Fatalf("view remote_dir = %q, want /home/", got)
+	}
+	if fp, _ := out["host_key_fingerprint"].(string); fp != "" {
+		t.Fatalf("view host_key_fingerprint = %q, want empty", fp)
+	}
+
+	// Existing records keep their pinned fingerprint (the migration only
+	// drops the required flag; it does not rewrite values).
+	pinned := "SHA256:" + strings.Repeat("B", 43)
+	st, out = doJSON(t, s, http.MethodPost, connBase, owner.token, map[string]any{
+		"owner": owner.id, "label": "pinned", "host": "127.0.0.1", "port": 22,
+		"username": "testuser", "auth_method": "password", "password": secretPlaintexts[0],
+		"host_key_fingerprint": pinned,
+	})
+	if st != http.StatusOK {
+		t.Fatalf("create pinned: status %d body %v", st, out)
+	}
+	st, out = doJSON(t, s, http.MethodGet, connBase+"/"+out["id"].(string), owner.token, nil)
+	if st != http.StatusOK {
+		t.Fatalf("view pinned: status %d", st)
+	}
+	if got, _ := out["host_key_fingerprint"].(string); got != pinned {
+		t.Fatalf("pinned fingerprint = %q, want %q", got, pinned)
+	}
+
+	// The owner-only rules still hold: a second user cannot see the record.
+	users, err := s.App.FindCollectionByNameOrId("users")
+	if err != nil {
+		t.Fatalf("users collection: %v", err)
+	}
+	otherRec := core.NewRecord(users)
+	otherRec.SetEmail("optional-fp-other@stratofold.test")
+	otherRec.SetPassword("otheruser-pass-123")
+	if err := s.App.Save(otherRec); err != nil {
+		t.Fatalf("seed other user: %v", err)
+	}
+	other := login(t, s, "optional-fp-other@stratofold.test", "otheruser-pass-123")
+	if st, _ := doJSON(t, s, http.MethodGet, connBase, other.token, nil); st != http.StatusOK {
+		t.Fatalf("other list: status %d", st)
+	}
+	if items := listItems(t, s, other, connBase); len(items) != 0 {
+		t.Fatalf("other list reveals owner's connections: got %d", len(items))
+	}
+}
+
 func TestVdirAuthzMatrix(t *testing.T) {
 	s := testapp.Start(t)
 	owner := login(t, s, testapp.TestUserEmail, testapp.TestUserPassword)

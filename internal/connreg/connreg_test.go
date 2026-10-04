@@ -1,6 +1,7 @@
 package connreg_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/mode777/stratofold/internal/connreg"
 	"github.com/mode777/stratofold/internal/ssherr"
 	"github.com/mode777/stratofold/internal/testapp"
+	"github.com/mode777/stratofold/internal/testssh"
 )
 
 // createConnection persists a connection record via the app (the
@@ -33,6 +35,77 @@ func createConnection(tb testing.TB, s *testapp.Server, host string) string {
 		tb.Fatalf("save connection: %v", err)
 	}
 	return r.Id
+}
+
+// TestCapturePersistsFingerprintWithoutInvalidating: an unpinned record's
+// first successful connect captures the host key, persists it via the
+// hook-free update, and leaves the live manager in place (design D3).
+func TestCapturePersistsFingerprintWithoutInvalidating(t *testing.T) {
+	s := testapp.Start(t)
+	f := testssh.Start(t, testssh.Options{})
+	defer f.Close()
+
+	_, rec := s.LoginBody(t)
+	col, err := s.App.FindCollectionByNameOrId("connections")
+	if err != nil {
+		t.Fatalf("connections collection: %v", err)
+	}
+	r := core.NewRecord(col)
+	r.Set("owner", rec["id"])
+	r.Set("label", "tofu")
+	r.Set("host", f.Host)
+	r.Set("port", f.Port)
+	r.Set("username", f.User)
+	r.Set("auth_method", "password")
+	r.Set("password", f.Password)
+	r.Set("remote_dir", "/home/")
+	// host_key_fingerprint intentionally omitted: trust on first use.
+	if err := s.App.Save(r); err != nil {
+		t.Fatalf("save connection: %v", err)
+	}
+	id := r.Id
+
+	reg := connreg.FromApp(s.App)
+	m1, err := reg.Manager(id)
+	if err != nil {
+		t.Fatalf("Manager: %v", err)
+	}
+	_, release, err := m1.Client(context.Background())
+	if err != nil {
+		t.Fatalf("Client: %v", err)
+	}
+	release()
+
+	// The captured fingerprint is persisted and readable.
+	rec2, err := s.App.FindRecordById("connections", id)
+	if err != nil {
+		t.Fatalf("find: %v", err)
+	}
+	if got := rec2.GetString("host_key_fingerprint"); got != f.Fingerprint {
+		t.Fatalf("persisted fingerprint = %q, want %q", got, f.Fingerprint)
+	}
+	// The remote directory is carried through the record plumbing.
+	if got := rec2.GetString("remote_dir"); got != "/home/" {
+		t.Fatalf("remote_dir = %q, want /home/", got)
+	}
+	// Secrets stay sealed (the capture update touched only the
+	// fingerprint column).
+	if got := rec2.GetString("password"); got == f.Password || !strings.HasPrefix(got, "v1:") {
+		t.Fatalf("password not left sealed: %q", got)
+	}
+
+	// The live manager survived the capture (same instance) and now
+	// verifies against the captured fingerprint.
+	m2, err := reg.Manager(id)
+	if err != nil {
+		t.Fatalf("Manager after capture: %v", err)
+	}
+	if m1 != m2 {
+		t.Fatalf("capture invalidated the live manager")
+	}
+	if got := m2.Config().HostKeyFingerprint; got != f.Fingerprint {
+		t.Fatalf("manager fingerprint = %q, want %q", got, f.Fingerprint)
+	}
 }
 
 func TestManagerSharedPerRecord(t *testing.T) {

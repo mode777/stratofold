@@ -129,6 +129,7 @@ export function VdirsPage() {
           existing={editing === "new" ? null : editing}
           connections={connections ?? []}
           connectionsLoading={connections === null}
+          ownerId={userId}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -154,18 +155,32 @@ function VdirForm({
   existing,
   connections,
   connectionsLoading,
+  ownerId,
   onClose,
   onSaved,
 }: {
   existing: VdirRecord | null;
   connections: ConnectionRecord[];
   connectionsLoading: boolean;
+  ownerId: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [isPublic, setIsPublic] = useState(existing?.is_public ?? false);
+  const [rootPath, setRootPath] = useState(existing?.root_path ?? "");
+  const [connectionId, setConnectionId] = useState(existing?.connection ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Creating a vdir: picking a connection offers its remote directory as
+  // the default root path (design D5). A non-empty default wins; an
+  // empty one leaves whatever the user typed. Editing never overwrites.
+  const onConnectionChange = (id: string) => {
+    setConnectionId(id);
+    if (existing) return;
+    const remoteDir = connections.find((c) => c.id === id)?.remote_dir;
+    if (remoteDir) setRootPath(remoteDir);
+  };
 
   // Only the user's own connections are selectable — the API rule
   // rejects foreign bindings anyway; the UI never offers them.
@@ -176,10 +191,13 @@ function VdirForm({
     const form = new FormData(e.currentTarget);
     const data: Record<string, unknown> = {
       name: String(form.get("name") ?? "").trim(),
-      root_path: String(form.get("root_path") ?? "").trim(),
-      connection: String(form.get("connection") ?? ""),
+      root_path: rootPath.trim(),
+      connection: connectionId,
       is_public: isPublic,
     };
+    // The vdirs create rule requires the owner to match the signed-in
+    // user; set on create only.
+    if (!existing) data.owner = ownerId;
     try {
       if (existing) {
         await updateVdir(existing.id, data);
@@ -205,7 +223,14 @@ function VdirForm({
         <label htmlFor="v-root" className="mt-3 block text-sm font-medium text-gray-700">
           Root path
         </label>
-        <input id="v-root" name="root_path" required defaultValue={existing?.root_path ?? ""} className={inputCls} />
+        <input
+          id="v-root"
+          name="root_path"
+          required
+          value={rootPath}
+          onChange={(e) => setRootPath(e.target.value)}
+          className={inputCls}
+        />
 
         <label htmlFor="v-connection" className="mt-3 block text-sm font-medium text-gray-700">
           Connection
@@ -214,7 +239,8 @@ function VdirForm({
           id="v-connection"
           name="connection"
           required
-          defaultValue={existing?.connection ?? ""}
+          value={connectionId}
+          onChange={(e) => onConnectionChange(e.target.value)}
           data-testid="v-connection"
           className={inputCls}
         >

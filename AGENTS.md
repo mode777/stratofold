@@ -53,9 +53,20 @@ see `docs/architecture.md`; finer details still follow.
   resolver (`internal/vdir`: lexical anchoring + server-side symlink
   walk, fail-closed before dialing); one `sshconn.Manager` per
   connection record, rebuilt when the record changes
-  (`internal/connreg`). The secret-sealing key lives in the app's
+  (`internal/connreg`). The connection's `host_key_fingerprint` is
+  optional (migration `1770000003_connection_remote_dir.go`): when set
+  it is verified on every dial, and when empty the first successfully
+  authenticated connection pins it (trust on first use —
+  `sshconn.WithHostKeyCapture`, persisted by `connreg` with a hook-free
+  DB update so the live manager survives; ADR 0007). A connection also
+  carries a `remote_dir` (e.g. `/home/`) used as the default vdir
+  `root_path` in the UI. Record creates from the SPA must include
+  `owner` = the signed-in user id (the create rules require it). The
+  secret-sealing key lives in the app's
   SQLite `_params` table (row `sf_sealbox_key`) — losing it orphans
   stored secrets; there is no key rotation yet.
+  Verification: `go test ./internal/migrations/ ./internal/sshconn/
+  ./internal/connreg/`.
 - **File server** (roadmap change 4): `GET
   /files/<vdir-id>/<virtual-path>` (bare `/files/<vdir-id>` = root)
   streams through the vdir sandbox — access is decided before any SSH

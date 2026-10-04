@@ -78,6 +78,12 @@ type Manager struct {
 	dialHook func()
 	connWrap func(net.Conn) net.Conn
 
+	// hostKeyCapture, when set, is invoked once with the observed
+	// fingerprint after an unpinned connection completes its handshake
+	// and authentication (trust on first use). It must not block the
+	// dial for long; the manager already pins the value in cfg.
+	hostKeyCapture func(fp string)
+
 	stopOnce sync.Once
 	stop     chan struct{}
 }
@@ -97,16 +103,28 @@ func WithConnWrap(fn func(net.Conn) net.Conn) Option {
 	return func(m *Manager) { m.connWrap = fn }
 }
 
+// WithHostKeyCapture registers a callback invoked once with the observed
+// host key fingerprint after the first successfully authenticated
+// connection when the manager was created without a pinned fingerprint
+// (trust on first use). The callback runs after the connection is
+// installed; it should persist the value, not block on the dial.
+func WithHostKeyCapture(fn func(fp string)) Option {
+	return func(m *Manager) { m.hostKeyCapture = fn }
+}
+
 // NewManager validates cfg and returns a manager for it.
 func NewManager(cfg Config, opts ...Option) (*Manager, error) {
 	if cfg.Host == "" || cfg.User == "" {
 		return nil, fmt.Errorf("sshconn: host and user are required")
 	}
-	if cfg.HostKeyFingerprint == "" {
-		return nil, fmt.Errorf("sshconn: pinned host key fingerprint is required")
-	}
-	if err := validateFingerprint(cfg.HostKeyFingerprint); err != nil {
-		return nil, err
+	// The fingerprint is optional: an empty value means trust on first
+	// use — the first successfully authenticated connection pins the
+	// presented key (WithHostKeyCapture), and later connections verify
+	// against it (design D1/D2).
+	if cfg.HostKeyFingerprint != "" {
+		if err := validateFingerprint(cfg.HostKeyFingerprint); err != nil {
+			return nil, err
+		}
 	}
 	if cfg.Password == "" && len(cfg.PrivateKeyPEM) == 0 {
 		return nil, fmt.Errorf("sshconn: one of password or private key is required")
@@ -127,8 +145,13 @@ func NewManager(cfg Config, opts ...Option) (*Manager, error) {
 	return m, nil
 }
 
-// Config returns a copy of the manager's configuration.
-func (m *Manager) Config() Config { return m.cfg }
+// Config returns a copy of the manager's configuration. It reflects a
+// fingerprint captured on first use.
+func (m *Manager) Config() Config {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.cfg
+}
 
 // Key identifies the managed connection.
 func (m *Manager) Key() string { return m.cfg.key() }
@@ -285,7 +308,11 @@ func (m *Manager) dial(ctx context.Context) (*sftp.Client, error) {
 	if m.connWrap != nil {
 		nc = m.connWrap(nc)
 	}
-	sconn, chans, reqs, err := ssh.NewClientConn(nc, addr, m.sshClientConfig())
+	// observed receives the presented host key when the manager has no
+	// pinned fingerprint (trust on first use); it is only acted on after
+	// the handshake and authentication succeed.
+	var observed string
+	sconn, chans, reqs, err := ssh.NewClientConn(nc, addr, m.sshClientConfig(&observed))
 	if err != nil {
 		nc.Close()
 		return nil, fmt.Errorf("sshconn: ssh handshake %s: %w", addr, err)
@@ -301,12 +328,23 @@ func (m *Manager) dial(ctx context.Context) (*sftp.Client, error) {
 		return nil, fmt.Errorf("sshconn: open sftp channel: %w", err)
 	}
 	m.mu.Lock()
+	newlyPinned := ""
+	if m.cfg.HostKeyFingerprint == "" && observed != "" {
+		m.cfg.HostKeyFingerprint = observed
+		newlyPinned = observed
+	}
 	m.sshCl = client
 	m.mu.Unlock()
+	// Persist the captured key outside the lock: the hook may touch the
+	// database. The manager already pins the value, so its own reconnects
+	// verify against it even if the hook fails.
+	if newlyPinned != "" && m.hostKeyCapture != nil {
+		m.hostKeyCapture(newlyPinned)
+	}
 	return scl, nil
 }
 
-func (m *Manager) sshClientConfig() *ssh.ClientConfig {
+func (m *Manager) sshClientConfig(observed *string) *ssh.ClientConfig {
 	auth := make([]ssh.AuthMethod, 0, 3)
 	if m.cfg.Password != "" {
 		auth = append(auth, ssh.Password(m.cfg.Password))
@@ -339,6 +377,12 @@ func (m *Manager) sshClientConfig() *ssh.ClientConfig {
 		Auth: auth,
 		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 			got := Fingerprint(key)
+			if fp == "" {
+				// Trust on first use: accept and report the key; the
+				// dial pins it only after authentication succeeds.
+				*observed = got
+				return nil
+			}
 			if got != fp {
 				return ssherr.HostKeyMismatch(got, fp)
 			}

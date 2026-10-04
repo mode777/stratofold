@@ -130,6 +130,11 @@ Owns the lifecycle of SSH/SFTP connections, keyed by connection record:
 - **Reconnect**: on failure, the manager reconnects with exponential
   backoff (base ~1 s, factor 2, cap ~5 min, with jitter). Exact timings
   are tunables, not invariants.
+- **Host keys**: the pinned SHA256 fingerprint is optional. When set,
+  every connection verifies it and a mismatch aborts permanently; when
+  unset, the first successfully authenticated connection captures and
+  pins the key (trust on first use, ADR 0007), persisted without dropping
+  the live connection.
 - **Retry-safe operations**: every operation is designed around the retry
   mechanism (see "Failure and retry model" below). This is an invariant
   all filesystem-touching code must honor.
@@ -162,8 +167,10 @@ Shipped screens and routes:
   `editor`): new folder, rename, move, delete, and multi-file upload.
 - `/connections`, `/vdirs` — create/edit/delete the user's own
   connections and vdirs over the record API; secrets are write-only
-  (never returned by the server, empty on edit = unchanged); vdir
-  binding offers only the user's own connections.
+  (never returned by the server, empty on edit = unchanged); the host-key
+  fingerprint is optional (empty = pinned on first connection, trust on
+  first use) and a connection's remote directory seeds the root path of
+  new vdirs; vdir binding offers only the user's own connections.
 - A vdir's owner manages shares in a dialog: grant `viewer`/`editor` by
   email (resolved through `/api/sf/users/lookup`), change the role, or
   revoke.
@@ -179,7 +186,7 @@ in-app navigation only (see the Upload flow).
 | Collection | Fields (sketch) | Notes |
 | ---------- | --------------- | ----- |
 | `users` | PocketBase auth collection | built-in |
-| `connections` | owner, label, host, port, username, auth method (`password`\|`key`), password, private key, key passphrase, host-key fingerprint | owner-only CRUD via API rules; secrets sealed at rest (AES-256-GCM, key in `_params`) and absent from every API response; host key pinned (ADR 0003) |
+| `connections` | owner, label, host, port, username, auth method (`password`\|`key`), password, private key, key passphrase, host-key fingerprint (optional), remote directory | owner-only CRUD via API rules; secrets sealed at rest (AES-256-GCM, key in `_params`) and absent from every API response; host key pinned when supplied, otherwise captured on first successful use (ADR 0007); `remote_dir` is a record-only default for new vdir root paths |
 | `vdirs` | owner, connection (rel), name, root path, is public | owner-only CRUD; reads (list/view) extend to users holding a share (back-relation rule, multi-match `?=`); a vdir must reference an own connection (rule-guarded on create and rebind); unique(owner, name); `is_public` grants anonymous read-only access |
 | `vdir_shares` | vdir (rel, cascade), user (rel, cascade), role (`viewer`/`editor`), unique(vdir, user) | owner-managed via API rules; the grantee sees their own shares; drives both the record-API read extension and the `/api/sf` + `/files` middleware |
 

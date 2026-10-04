@@ -12,11 +12,13 @@ import {
   updateConnection,
   type ConnectionRecord,
 } from "../lib/records";
+import { useSession } from "../lib/session";
 import { Dialog } from "../components/Dialog";
 import { FailureState, Spinner } from "../components/Errors";
 import type { ApiFailure } from "../lib/filesApi";
 
 export function ConnectionsPage() {
+  const { userId } = useSession();
   const [connections, setConnections] = useState<ConnectionRecord[]>([]);
   const [failure, setFailure] = useState<ApiFailure | null>(null);
   const [loading, setLoading] = useState(true);
@@ -91,6 +93,7 @@ export function ConnectionsPage() {
                 <span className="block truncate font-medium">{c.label}</span>
                 <span className="block truncate text-sm text-gray-500">
                   {c.username}@{c.host}:{c.port} · {c.auth_method}
+                  {c.remote_dir ? ` · ${c.remote_dir}` : ""}
                 </span>
               </span>
               <button
@@ -116,6 +119,7 @@ export function ConnectionsPage() {
       {editing && (
         <ConnectionForm
           existing={editing === "new" ? null : editing}
+          ownerId={userId}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -131,10 +135,12 @@ const inputCls = "mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm f
 
 function ConnectionForm({
   existing,
+  ownerId,
   onClose,
   onSaved,
 }: {
   existing: ConnectionRecord | null;
+  ownerId: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -156,7 +162,12 @@ function ConnectionForm({
       username: String(form.get("username") ?? "").trim(),
       auth_method: authMethod,
       host_key_fingerprint: String(form.get("host_key_fingerprint") ?? "").trim(),
+      remote_dir: String(form.get("remote_dir") ?? "").trim(),
     };
+    // The connections create rule requires the owner to match the
+    // signed-in user; it is set on create only (updates stay owner-only
+    // by rule and must not rebind ownership).
+    if (!existing) data.owner = ownerId;
     const password = String(form.get("password") ?? "");
     const privateKey = String(form.get("private_key") ?? "");
     const keyPassphrase = String(form.get("key_passphrase") ?? "");
@@ -266,15 +277,31 @@ function ConnectionForm({
         )}
 
         <label htmlFor="c-fingerprint" className="mt-3 block text-sm font-medium text-gray-700">
-          Host key fingerprint
+          Host key fingerprint <span className="font-normal text-gray-400">(optional)</span>
         </label>
         <input
           id="c-fingerprint"
           name="host_key_fingerprint"
-          required
           defaultValue={existing?.host_key_fingerprint ?? ""}
           className={inputCls}
         />
+        <p className="mt-1 text-xs text-gray-500">
+          Leave empty to pin the host key on the first successful connection (trust on first use).
+        </p>
+
+        <label htmlFor="c-remote-dir" className="mt-3 block text-sm font-medium text-gray-700">
+          Remote directory
+        </label>
+        <input
+          id="c-remote-dir"
+          name="remote_dir"
+          placeholder="/home/"
+          defaultValue={existing?.remote_dir ?? ""}
+          className={inputCls}
+        />
+        <p className="mt-1 text-xs text-gray-500">
+          Default root path offered when creating a vdir on this connection.
+        </p>
 
         {error && (
           <p role="alert" className="mt-3 text-sm text-red-600">

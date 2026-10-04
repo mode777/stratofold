@@ -4,6 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConnectionsPage } from "./ConnectionsPage";
 import { listOf, installPbMock, type SendHandler } from "../test/mockApi";
 
+vi.mock("../lib/session", () => ({
+  useSession: () => ({
+    state: "authenticated",
+    userId: "u1",
+    userEmail: "owner@stratofold.test",
+    login: vi.fn(),
+    logout: vi.fn(),
+  }),
+}));
+
 type Call = { method: string; path: string; body: Record<string, unknown> };
 
 function recordCollection(initial: Record<string, unknown>[]) {
@@ -56,12 +66,13 @@ describe("connections management", () => {
     await user.type(screen.getByLabelText("Host"), "ssh.example.com");
     await user.type(screen.getByLabelText("Username"), "alice");
     await user.type(screen.getByLabelText(/^Password/), "s3cret");
-    await user.type(screen.getByLabelText("Host key fingerprint"), "SHA256:abc");
+    await user.type(screen.getByLabelText(/Host key fingerprint/), "SHA256:abc");
     await user.click(screen.getByTestId("connection-save"));
 
     await waitFor(() => expect(store.calls.some((c) => c.method === "POST")).toBe(true));
     const created = store.calls.find((c) => c.method === "POST")!.body;
     expect(created).toMatchObject({
+      owner: "u1",
       label: "Box",
       host: "ssh.example.com",
       username: "alice",
@@ -85,11 +96,12 @@ describe("connections management", () => {
     await user.selectOptions(screen.getByTestId("c-auth"), "key");
     await user.type(screen.getByLabelText(/^Private key/), "-----BEGIN KEY-----");
     await user.type(screen.getByLabelText(/Key passphrase/), "pass");
-    await user.type(screen.getByLabelText("Host key fingerprint"), "SHA256:def");
+    await user.type(screen.getByLabelText(/Host key fingerprint/), "SHA256:def");
     await user.click(screen.getByTestId("connection-save"));
 
     await waitFor(() => expect(store.calls.some((c) => c.method === "POST")).toBe(true));
     expect(store.calls.find((c) => c.method === "POST")!.body).toMatchObject({
+      owner: "u1",
       auth_method: "key",
       private_key: "-----BEGIN KEY-----",
       key_passphrase: "pass",
@@ -139,5 +151,30 @@ describe("connections management", () => {
 
     await waitFor(() => expect(screen.queryByTestId("connection-row")).not.toBeInTheDocument());
     expect(store.calls.some((c) => c.method === "DELETE")).toBe(true);
+  });
+
+  it("creates a connection without a fingerprint and with a remote directory", async () => {
+    const store = recordCollection([]);
+    installPbMock([store.handler]);
+    render(<ConnectionsPage />);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("new-connection"));
+    await user.type(screen.getByLabelText("Label"), "Box");
+    await user.type(screen.getByLabelText("Host"), "ssh.example.com");
+    await user.type(screen.getByLabelText("Username"), "alice");
+    await user.type(screen.getByLabelText(/^Password/), "s3cret");
+    await user.type(screen.getByLabelText("Remote directory"), "/home/");
+    // Fingerprint intentionally left empty (trust on first use).
+    await user.click(screen.getByTestId("connection-save"));
+
+    await waitFor(() => expect(store.calls.some((c) => c.method === "POST")).toBe(true));
+    expect(store.calls.find((c) => c.method === "POST")!.body).toMatchObject({
+      owner: "u1",
+      host_key_fingerprint: "",
+      remote_dir: "/home/",
+    });
+    // The list shows the remote directory.
+    await waitFor(() => expect(screen.getByTestId("connection-row")).toHaveTextContent("/home/"));
   });
 });

@@ -24,7 +24,11 @@ export type ConnectionRecord = {
   port: number;
   username: string;
   auth_method: "password" | "key";
-  host_key_fingerprint: string;
+  // Optional: when absent the host key is pinned on first successful
+  // connection (trust on first use).
+  host_key_fingerprint?: string;
+  // Default base directory for new vdirs on this connection.
+  remote_dir?: string;
 };
 
 export type ShareRecord = {

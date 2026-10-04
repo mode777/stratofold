@@ -247,6 +247,129 @@ func TestClientClosedErrors(t *testing.T) {
 	}
 }
 
+// TestHostKeyCaptureOnFirstUse: an unpinned manager accepts the first
+// host key, pins it, and reports it through the capture hook exactly
+// once (spec: host key changes abort — unpinned connection captures).
+func TestHostKeyCaptureOnFirstUse(t *testing.T) {
+	f := testssh.Start(t, testssh.Options{})
+	defer f.Close()
+
+	var mu sync.Mutex
+	var captured []string
+	cfg := mgrCfg(f, 20*time.Minute)
+	cfg.HostKeyFingerprint = ""
+	m, err := sshconn.NewManager(cfg, sshconn.WithHostKeyCapture(func(fp string) {
+		mu.Lock()
+		captured = append(captured, fp)
+		mu.Unlock()
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	tr := sftpreadwrite.New(m, f.Path("hello.txt"), sftpreadwrite.Options{})
+	if _, err := tr.ReadRange(context.Background(), 0, 6); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	got := append([]string(nil), captured...)
+	mu.Unlock()
+	if len(got) != 1 || got[0] != f.Fingerprint {
+		t.Fatalf("capture hook calls = %v, want [%s]", got, f.Fingerprint)
+	}
+	if m.Config().HostKeyFingerprint != f.Fingerprint {
+		t.Fatalf("manager fingerprint = %q, want %q", m.Config().HostKeyFingerprint, f.Fingerprint)
+	}
+
+	// Reusing the healthy connection must not re-invoke the hook.
+	tr2 := sftpreadwrite.New(m, f.Path("hello.txt"), sftpreadwrite.Options{})
+	if _, err := tr2.ReadRange(context.Background(), 0, 6); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	n := len(captured)
+	mu.Unlock()
+	if n != 1 {
+		t.Fatalf("capture hook called %d times, want 1", n)
+	}
+}
+
+// TestCapturedFingerprintEnforcedOnLaterConnection: after first-use
+// capture, a host presenting a different key is refused permanently.
+// Requires two fixtures with distinct host keys, so inproc only.
+func TestCapturedFingerprintEnforcedOnLaterConnection(t *testing.T) {
+	f1 := testssh.Start(t, testssh.Options{})
+	defer f1.Close()
+	if f1.Mode != testssh.ModeInproc {
+		t.Skip("needs two fixtures with distinct host keys (inproc)")
+	}
+	f2 := testssh.Start(t, testssh.Options{})
+	defer f2.Close()
+	if f1.Fingerprint == f2.Fingerprint {
+		t.Fatal("fixtures share a host key; test cannot distinguish")
+	}
+
+	// First use against f1 captures f1's fingerprint.
+	cfg := mgrCfg(f1, 20*time.Minute)
+	cfg.HostKeyFingerprint = ""
+	var captured string
+	m1, err := sshconn.NewManager(cfg, sshconn.WithHostKeyCapture(func(fp string) { captured = fp }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m1.Close()
+	tr := sftpreadwrite.New(m1, f1.Path("hello.txt"), sftpreadwrite.Options{})
+	if _, err := tr.ReadRange(context.Background(), 0, 6); err != nil {
+		t.Fatal(err)
+	}
+	if captured != f1.Fingerprint {
+		t.Fatalf("captured %q, want %q", captured, f1.Fingerprint)
+	}
+
+	// A manager pinned to the captured fingerprint refuses f2's key.
+	cfg2 := mgrCfg(f2, 20*time.Minute)
+	cfg2.HostKeyFingerprint = captured
+	m2, err := sshconn.NewManager(cfg2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m2.Close()
+	if _, _, err := m2.Client(context.Background()); !errors.Is(err, ssherr.ErrHostKeyMismatch) {
+		t.Fatalf("err = %v, want host key mismatch", err)
+	}
+}
+
+// TestFailedAuthDoesNotPin: the host key is accepted during the
+// handshake but authentication fails, so nothing is captured (spec:
+// failed authentication does not pin).
+func TestFailedAuthDoesNotPin(t *testing.T) {
+	f := testssh.Start(t, testssh.Options{})
+	defer f.Close()
+
+	var calls atomic.Int64
+	cfg := mgrCfg(f, 20*time.Minute)
+	cfg.HostKeyFingerprint = ""
+	cfg.Password = "definitely-wrong"
+	m, err := sshconn.NewManager(cfg, sshconn.WithHostKeyCapture(func(string) { calls.Add(1) }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	if _, _, err := m.Client(ctx); err == nil {
+		t.Fatal("expected authentication failure")
+	}
+	if n := calls.Load(); n != 0 {
+		t.Fatalf("capture hook called %d times after failed auth, want 0", n)
+	}
+	if m.Config().HostKeyFingerprint != "" {
+		t.Fatalf("fingerprint pinned after failed auth: %q", m.Config().HostKeyFingerprint)
+	}
+}
+
 func mgrCfg(f *testssh.Fixture, ttl time.Duration) sshconn.Config {
 	return sshconn.Config{
 		Host:               f.Host,
