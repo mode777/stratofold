@@ -1,0 +1,25 @@
+version: "3.8"
+
+# Throwaway OpenSSH fixture for Stratofold integration tests.
+# Started on demand by internal/testssh (docker mode); never run in
+# production. Credentials below are throwaway test values only.
+services:
+  openssh:
+    image: lscr.io/linuxserver/openssh-server:latest
+    container_name: sf-test-sshd
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+      - USER_NAME=testuser
+      - PASSWORD_ACCESS=sf-fixture-password
+    volumes:
+      - ./seed.sh:/custom-cont-init.d/00-seed.sh:ro
+      - sf_test_ssh_config:/config
+      - sf_test_data:/data
+    ports:
+      - "2222" # ephemeral host port; resolved via `docker compose port`
+
+volumes:
+  sf_test_ssh_config: {}
+  sf_test_data: {}

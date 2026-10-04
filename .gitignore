@@ -1,0 +1,9 @@
+node_modules/
+build/
+build-*/
+__pycache__/
+*.pyc
+pb_data/
+web/dist/
+web/test-results/
+web/playwright-report/

@@ -1,0 +1,48 @@
+schema: spec-driven
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+context: |
+  Stratofold is a cloud file manager (early stage — the tech stack is
+  being settled change by change). Stack-shaping choices are recorded as
+  ADRs in docs/decisions/ at the moment they are made, so later
+  proposals inherit them instead of relitigating them.
+
+  Doc map: openspec/specs/ pin required behavior; docs/decisions/ hold
+  the durable why behind cross-cutting invariants (ADRs — indexed in
+  docs/decisions/README.md); AGENTS.md points rather than restates.
+
+  Proposals name the capability spec(s) under openspec/specs/ they
+  modify or create; docs/tooling changes may set skip_specs.
+
+# Per-artifact rules (optional)
+rules:
+  proposal:
+    - Name the capability spec(s) this change modifies or creates, or set
+      `skip_specs` for docs/tooling changes
+    - Name the affected docs (README, docs/decisions) and state explicitly
+      whether an ADR is needed ("No ADR — reason" vs "new ADR
+      docs/decisions/NNNN")
+    - State explicitly what is out of scope (Non-goals)
+  tasks:
+    - When the change settles a durable architecture decision, include an
+      explicit task to write the ADR (docs/decisions/NNNN per TEMPLATE.md) and
+      add it to the docs/decisions/README.md index
+    - Include a docs update task whenever invariants or the agent guidance
+      in AGENTS.md change
+    - Include a verification task naming the applicable harness (test
+      suites, or docs validation such as `openspec validate --strict`)
+  design:
+    - Record rejected alternatives with the reason they lost
+
+# Per-operation guidance (optional)
+operations:
+  apply:
+    guidance:
+      - If a durable decision is settled during apply that the proposal did not
+        anticipate, record it in the design doc and note whether an ADR must
+        follow before archive
+  archive:
+    guidance:
+      - Before archiving, confirm any ADR the change promised is written in
+        docs/decisions/ and indexed in docs/decisions/README.md

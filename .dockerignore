@@ -1,0 +1,15 @@
+.git
+.gitignore
+.github
+**/node_modules
+web/dist
+pb_data
+build/
+build-*/
+__pycache__/
+*.pyc
+web/test-results/
+web/playwright-report/
+openspec/
+docs/
+.opencode/

@@ -1,0 +1,175 @@
+# Builds, verifies, and publishes the Stratofold image.
+#
+# Trigger: pushing a version tag matching `v*` (for example `v0.1.0`).
+# Ordinary branch pushes never build an image — Docker builds run
+# exclusively here (ADR 0006).
+#
+# The job builds the `e2e` image target, runs the browser E2E suite
+# against the running container, smoke-tests the `runtime` image (SPA
+# shell served, health endpoint, SQLite state surviving a restart),
+# enforces an image-size budget, then pushes the `runtime` image to
+# Harbor. The image tag is the release tag without the leading `v`.
+#
+# Required repository secrets (never committed to the repository):
+#   HARBOR_ROBOT  — Harbor robot account name with push rights to my/stratofold
+#   HARBOR_TOKEN  — its secret
+name: release-image
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: harbor.alexklingenbeck.de/my/stratofold
+  IMAGE_SIZE_BUDGET_MB: "100"
+
+jobs:
+  build-verify-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a version tag
+        if: github.ref_type != 'tag'
+        run: |
+          echo "release-image only runs on v* tags" >&2
+          exit 1
+
+      - uses: actions/checkout@v5
+
+      - name: Read version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build E2E image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: e2e
+          load: true
+          push: false
+          tags: stratofold-e2e:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start E2E stack container
+        run: |
+          set -euo pipefail
+          docker run -d --name sf-e2e -p 8090:8090 stratofold-e2e:ci
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8090/api/health >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          echo "E2E stack did not become healthy" >&2
+          docker logs sf-e2e >&2
+          exit 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install web dependencies and browser
+        working-directory: web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run E2E suite against the built image
+        working-directory: web
+        env:
+          SF_E2E_BASE_URL: http://127.0.0.1:8090
+        run: npm run e2e
+
+      - name: Stop E2E container
+        if: always()
+        run: docker rm -f sf-e2e || true
+
+      - name: Build runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+
+      - name: Smoke-test runtime image
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          docker volume create sf-smoke
+          docker run --rm -v sf-smoke:/pb_data "$IMAGE:$VERSION" \
+            --dir=/pb_data superuser upsert smoke@stratofold.test smoke-pass-123
+          start_smoke() {
+            docker run -d --name sf-smoke -p 8091:8090 -v sf-smoke:/pb_data "$IMAGE:$VERSION"
+            for _ in $(seq 1 60); do
+              if curl -fsS http://127.0.0.1:8091/api/health >/dev/null; then return 0; fi
+              sleep 1
+            done
+            echo "runtime image did not become healthy" >&2
+            docker logs sf-smoke >&2
+            return 1
+          }
+          auth_smoke() {
+            curl -fsS -X POST \
+              http://127.0.0.1:8091/api/collections/_superusers/auth-with-password \
+              -H 'Content-Type: application/json' \
+              -d '{"identity":"smoke@stratofold.test","password":"smoke-pass-123"}' >/dev/null
+          }
+          start_smoke
+          # The embedded SPA shell is served by the binary itself.
+          curl -fsS http://127.0.0.1:8091/ | grep -qi "<!doctype html"
+          # The superuser created by the one-off command persisted.
+          auth_smoke
+          # Restart with the same volume: state survives.
+          docker rm -f sf-smoke
+          start_smoke
+          auth_smoke
+          docker rm -f sf-smoke
+          docker volume rm sf-smoke
+
+      - name: Enforce image-size budget
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          bytes=$(docker image inspect -f '{{.Size}}' "$IMAGE:$VERSION")
+          budget=$(( IMAGE_SIZE_BUDGET_MB * 1024 * 1024 ))
+          echo "image size: ${bytes} bytes (budget: ${budget} bytes)"
+          if [ "$bytes" -gt "$budget" ]; then
+            echo "image exceeds the ${IMAGE_SIZE_BUDGET_MB} MB budget" >&2
+            exit 1
+          fi
+
+      - name: Log in to Harbor
+        uses: docker/login-action@v3
+        with:
+          registry: harbor.alexklingenbeck.de
+          username: ${{ secrets.HARBOR_ROBOT }}
+          password: ${{ secrets.HARBOR_TOKEN }}
+
+      - name: Push image
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          docker tag "$IMAGE:$VERSION" "$IMAGE:latest"
+          docker push "$IMAGE:$VERSION"
+          docker push "$IMAGE:latest"
