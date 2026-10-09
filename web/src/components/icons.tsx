@@ -288,6 +288,16 @@ export function DownloadIcon(props: IconProps) {
   );
 }
 
+export function InstallIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 3v10" />
+      <path d="M8 9l4 4 4-4" />
+      <path d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
+    </Svg>
+  );
+}
+
 export function RefreshIcon(props: IconProps) {
   return (
     <Svg {...props}>

@@ -6,13 +6,15 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { listConnections, type ConnectionRecord } from "../lib/records";
 import { useSession } from "../lib/session";
+import { useInstallPrompt } from "../lib/useInstallPrompt";
 import { useVdirs } from "../lib/useVdirs";
 import { Alert } from "../components/Dialog";
-import { ChevronRightIcon, FolderIcon, LogoutIcon, PersonIcon, ServerIcon } from "../components/icons";
+import { ChevronRightIcon, FolderIcon, InstallIcon, LogoutIcon, PersonIcon, ServerIcon } from "../components/icons";
 
 export function SettingsPage() {
   const { userEmail, userId, logout } = useSession();
   const { vdirs } = useVdirs();
+  const { canInstall, promptInstall } = useInstallPrompt();
   const navigate = useNavigate();
   const [connections, setConnections] = useState<ConnectionRecord[] | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -62,6 +64,26 @@ export function SettingsPage() {
             </button>
           </div>
         </section>
+
+        {canInstall && (
+          <section>
+            <h2 className="px-2 py-1 text-xs font-semibold uppercase tracking-wider text-ios-secondary/60">
+              App
+            </h2>
+            <div className="divide-y divide-ios-separator overflow-hidden rounded-2xl border border-black/5 bg-ios-card shadow-sm">
+              <button
+                type="button"
+                data-testid="settings-install"
+                onClick={() => void promptInstall()}
+                className="flex w-full items-center gap-3 px-4 py-3.5 text-left active:bg-ios-bg"
+              >
+                <InstallIcon className="text-base text-ios-blue" />
+                <span className="flex-1 text-base font-semibold text-ios-label">Install app</span>
+                <ChevronRightIcon className="text-xs text-ios-secondary/30" />
+              </button>
+            </div>
+          </section>
+        )}
 
         <section>
           <h2 className="px-2 py-1 text-xs font-semibold uppercase tracking-wider text-ios-secondary/60">

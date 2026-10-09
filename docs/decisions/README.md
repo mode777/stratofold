@@ -18,6 +18,7 @@ directory holds only what stays true after a change is archived.
 | 0006 | Accepted | Release images build in CI on `v*` tags and publish to Harbor |
 | 0007 | Accepted | Optional pinned host key with trust on first use |
 | 0008 | Accepted | iOS-style mobile-first SPA shell and design system |
+| 0009 | Accepted | Installable PWA with no offline capability |
 
 ## Adding a decision
 

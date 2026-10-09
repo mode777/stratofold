@@ -122,6 +122,12 @@ see `docs/architecture.md`; finer details still follow.
   (browse), `/v/:vdirId/view/*` (preview), `/v/:vdirId/move` (move
   picker), `/uploads`, `/settings`, `/settings/connections[/:id]`,
   `/settings/vdirs[/:id[/sharing]]`; unknown routes show Page Not Found.
+  The SPA is installable as a PWA (ADR 0009): `web/public/manifest.json`
+  (served as `application/json`) and the committed icons under
+  `web/public/icons/` are linked from `web/index.html`, Settings offers an
+  install action only while `beforeinstallprompt` is available
+  (`web/src/lib/useInstallPrompt.ts`), and there is deliberately **no
+  service worker and no offline behavior**.
   Root script shims are
   `npm run web` (dev server on 127.0.0.1:5173, proxying `/api` + `/files`
   to 127.0.0.1:8090), `web:build` (output `web/dist`), `web:test`
@@ -142,8 +148,10 @@ see `docs/architecture.md`; finer details still follow.
   `SF_E2E_BASE_URL` + `SF_E2E_EXECUTABLE` (the server's
   chrome-headless-shell). Component tests gate locally; E2E gates on
   the verification server.
-  Verification: `npm --prefix web run test`; E2E on the build server via
-  `npm --prefix web run e2e` (or the `SF_E2E_BASE_URL` override);
+  Verification: `npm --prefix web run test` (PWA manifest/shell/install-hook
+  tests in `web/src/pwa/` and `web/src/lib/useInstallPrompt.test.tsx`); E2E
+  on the build server via `npm --prefix web run e2e` (`web/e2e/pwa.spec.ts`,
+  or the `SF_E2E_BASE_URL` override);
   `go test ./internal/userlookup/ ./internal/appserver/`.
 - **File management & uploads** (roadmap change 8): the browse view
   offers new-folder / rename / move / delete and multi-file upload,

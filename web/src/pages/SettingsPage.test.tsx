@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -70,5 +70,33 @@ describe("settings", () => {
     expect(await screen.findByText(/signed out on all devices/)).toBeInTheDocument();
     await user.click(screen.getByTestId("signout-confirm"));
     expect(mocks.logout).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers an install action only when the browser can install", async () => {
+    installPbMock([
+      (path) => (path.includes("/collections/vdirs/records") ? listOf([MINE]) : undefined),
+      (path) => (path.includes("/collections/connections/records") ? listOf([]) : undefined),
+    ]);
+    renderSettings();
+    await screen.findByTestId("settings-page");
+
+    // No install prompt captured yet: no affordance.
+    expect(screen.queryByTestId("settings-install")).not.toBeInTheDocument();
+
+    const prompt = vi.fn(async () => {});
+    const event = new Event("beforeinstallprompt", { cancelable: true });
+    Object.assign(event, {
+      prompt,
+      platforms: ["web"],
+      userChoice: Promise.resolve({ outcome: "accepted", platform: "web" }),
+    });
+    act(() => {
+      window.dispatchEvent(event);
+    });
+
+    const install = await screen.findByTestId("settings-install");
+    const user = userEvent.setup();
+    await user.click(install);
+    expect(prompt).toHaveBeenCalledTimes(1);
   });
 });

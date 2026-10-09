@@ -152,6 +152,15 @@ Drive-like; no dedicated media player — media entries open their
 `/files` URL in a new browser tab and the browser's native player
 serves it via Range requests.
 
+The SPA is an **installable PWA with no offline capability** (ADR 0009):
+`web/public/manifest.json` (served as `application/json`) and the
+committed icon set under `web/public/icons/` make it installable and
+launchable standalone; `web/index.html` links them and carries the iOS
+Add to Home Screen metadata, and Settings offers an install action only
+while Chromium's `beforeinstallprompt` is available. It registers no
+service worker and caches nothing, so an installed app always requires
+the network.
+
 Shipped screens and routes:
 
 - `/login` — the only screen an unauthenticated visitor sees; posts to
@@ -286,6 +295,8 @@ budget, and pushes `harbor.alexklingenbeck.de/my/stratofold:<version>`
 Explicitly out of scope for now (design seams exist, no commitments):
 
 - Connection pools (more than one connection per SSH host)
+- Offline behavior and any service worker: the app is installable but
+  deliberately caches nothing (ADR 0009)
 - Service-worker-backed uploads that survive tab close
 - Horizontal scaling / multi-node (SQLite, single node)
 - Protocols other than SSH/SFTP
