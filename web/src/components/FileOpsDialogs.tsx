@@ -1,81 +1,82 @@
-// File-management dialogs (web-ui spec, design D5): create folder,
-// rename, move, and delete over the filesystem API. Each reuses Dialog
-// and FailureState so the deterministic error classes render as the
+// File-management overlays (web-ui spec, design D5/D6): New Folder and
+// Rename as bottom `Sheet`s, Delete as a destructive `Alert`. Each
+// reuses FailureState so the deterministic error classes render as the
 // established states, with a working retry on 503.
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useState } from "react";
 import { mkdir, mv, rm, type ApiFailure, type LsEntry } from "../lib/filesApi";
 import { joinPath, parentPath } from "../lib/listing";
 import { toApiFailure } from "../lib/records";
-import { Dialog } from "./Dialog";
+import { Alert, Sheet } from "./Dialog";
 import { FailureState } from "./Errors";
 
-const inputCls =
-  "mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-600 focus:outline-none";
-const labelCls = "block text-sm font-medium text-gray-700";
-const submitCls =
-  "mt-4 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50";
-const cancelCls = "mt-4 rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50";
-
-function FormActions({
+function SheetHeader({
+  title,
+  actionLabel,
   busy,
-  label,
-  testid,
+  disabled,
   onCancel,
+  onSubmit,
+  testid,
 }: {
+  title: string;
+  actionLabel: string;
   busy: boolean;
-  label: string;
-  testid: string;
+  disabled?: boolean;
   onCancel: () => void;
+  onSubmit: () => void;
+  testid: string;
 }) {
   return (
-    <div className="flex items-center justify-end gap-2">
-      <button type="button" onClick={onCancel} className={cancelCls}>
+    <div className="flex items-center justify-between px-4 py-2">
+      <button type="button" onClick={onCancel} className="text-base text-ios-blue">
         Cancel
       </button>
-      <button type="submit" disabled={busy} data-testid={testid} className={submitCls}>
-        {label}
+      <h2 className="text-base font-bold text-ios-label">{title}</h2>
+      <button
+        type="button"
+        disabled={busy || disabled}
+        data-testid={testid}
+        onClick={onSubmit}
+        className="text-base font-bold text-ios-blue disabled:opacity-40"
+      >
+        {actionLabel}
       </button>
     </div>
   );
 }
 
-function DialogFailure({
-  failure,
-  onRetry,
-  onClose,
+function Field({
+  id,
+  value,
+  onChange,
+  placeholder,
+  autoFocus,
+  testid,
 }: {
-  failure: ApiFailure;
-  onRetry?: () => void;
-  onClose: () => void;
+  id: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  autoFocus?: boolean;
+  testid: string;
 }) {
   return (
-    <>
-      <FailureState failure={failure} onRetry={onRetry} />
-      <div className="mt-3 text-right">
-        <button type="button" onClick={onClose} className={cancelCls}>
-          Close
-        </button>
-      </div>
-    </>
+    <div className="mx-4 mb-3 rounded-2xl border border-black/5 bg-ios-card p-3 shadow-sm">
+      <input
+        id={id}
+        data-testid={testid}
+        value={value}
+        autoFocus={autoFocus}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full bg-transparent text-base text-ios-label outline-none"
+      />
+    </div>
   );
 }
 
-function Form({
-  onSubmit,
-  children,
-}: {
-  onSubmit: (e: FormEvent) => void;
-  children: ReactNode;
-}) {
-  return (
-    <form onSubmit={onSubmit} noValidate>
-      {children}
-    </form>
-  );
-}
-
-export function MkdirDialog({
+export function MkdirSheet({
   vdirId,
   dir,
   onClose,
@@ -90,8 +91,7 @@ export function MkdirDialog({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<ApiFailure | null>(null);
 
-  const submit = async (e?: FormEvent) => {
-    e?.preventDefault();
+  const submit = async () => {
     if (!name.trim()) return;
     setBusy(true);
     setFailure(null);
@@ -106,34 +106,41 @@ export function MkdirDialog({
   };
 
   return (
-    <Dialog title="New folder" onClose={onClose}>
+    <Sheet label="New Folder" onClose={onClose}>
+      <SheetHeader
+        title="New Folder"
+        actionLabel="Create"
+        busy={busy}
+        disabled={!name.trim()}
+        onCancel={onClose}
+        onSubmit={() => void submit()}
+        testid="mkdir-submit"
+      />
       {failure ? (
-        <DialogFailure
-          failure={failure}
-          onRetry={failure.kind === "retryable" ? () => void submit() : undefined}
-          onClose={onClose}
-        />
-      ) : (
-        <Form onSubmit={(e) => void submit(e)}>
-          <label htmlFor="mkdir-name" className={labelCls}>
-            Folder name
-          </label>
-          <input
-            id="mkdir-name"
-            data-testid="mkdir-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className={inputCls}
-            autoFocus
+        <div className="pb-6">
+          <FailureState
+            failure={failure}
+            onRetry={failure.kind === "retryable" ? () => void submit() : undefined}
           />
-          <FormActions busy={busy || !name.trim()} label="Create" testid="mkdir-submit" onCancel={onClose} />
-        </Form>
+          <div className="text-center">
+            <button type="button" onClick={onClose} className="text-base text-ios-blue">
+              Close
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <Field id="mkdir-name" testid="mkdir-name" value={name} onChange={setName} placeholder="Folder name" autoFocus />
+          <p className="pb-6 text-center text-xs text-ios-secondary/60">
+            Will be created inside {dir || "the vdir root"}
+          </p>
+        </>
       )}
-    </Dialog>
+    </Sheet>
   );
 }
 
-export function RenameDialog({
+export function RenameSheet({
   vdirId,
   entry,
   path,
@@ -150,8 +157,7 @@ export function RenameDialog({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<ApiFailure | null>(null);
 
-  const submit = async (e?: FormEvent) => {
-    e?.preventDefault();
+  const submit = async () => {
     if (!name.trim()) return;
     setBusy(true);
     setFailure(null);
@@ -166,99 +172,39 @@ export function RenameDialog({
   };
 
   return (
-    <Dialog title={`Rename ${entry.name}`} onClose={onClose}>
+    <Sheet label="Rename" onClose={onClose}>
+      <SheetHeader
+        title="Rename"
+        actionLabel="Rename"
+        busy={busy}
+        disabled={!name.trim()}
+        onCancel={onClose}
+        onSubmit={() => void submit()}
+        testid="rename-submit"
+      />
       {failure ? (
-        <DialogFailure
-          failure={failure}
-          onRetry={failure.kind === "retryable" ? () => void submit() : undefined}
-          onClose={onClose}
-        />
-      ) : (
-        <Form onSubmit={(e) => void submit(e)}>
-          <label htmlFor="rename-name" className={labelCls}>
-            New name
-          </label>
-          <input
-            id="rename-name"
-            data-testid="rename-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className={inputCls}
-            autoFocus
+        <div className="pb-6">
+          <FailureState
+            failure={failure}
+            onRetry={failure.kind === "retryable" ? () => void submit() : undefined}
           />
-          <FormActions busy={busy || !name.trim()} label="Rename" testid="rename-submit" onCancel={onClose} />
-        </Form>
+          <div className="text-center">
+            <button type="button" onClick={onClose} className="text-base text-ios-blue">
+              Close
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <Field id="rename-name" testid="rename-name" value={name} onChange={setName} autoFocus />
+          <p className="pb-6 text-center text-xs text-ios-secondary/60">The extension is preserved.</p>
+        </>
       )}
-    </Dialog>
+    </Sheet>
   );
 }
 
-export function MoveDialog({
-  vdirId,
-  entry,
-  path,
-  onClose,
-  onDone,
-}: {
-  vdirId: string;
-  entry: LsEntry;
-  path: string;
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const [to, setTo] = useState(path);
-  const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<ApiFailure | null>(null);
-
-  const submit = async (e?: FormEvent) => {
-    e?.preventDefault();
-    if (!to.trim() || to.trim() === path) return;
-    setBusy(true);
-    setFailure(null);
-    try {
-      await mv(vdirId, path, to.trim());
-      onDone();
-    } catch (err) {
-      setFailure(toApiFailure(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Dialog title={`Move ${entry.name}`} onClose={onClose}>
-      {failure ? (
-        <DialogFailure
-          failure={failure}
-          onRetry={failure.kind === "retryable" ? () => void submit() : undefined}
-          onClose={onClose}
-        />
-      ) : (
-        <Form onSubmit={(e) => void submit(e)}>
-          <label htmlFor="move-to" className={labelCls}>
-            Destination path
-          </label>
-          <input
-            id="move-to"
-            data-testid="move-to"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            className={inputCls}
-            autoFocus
-          />
-          <FormActions
-            busy={busy || !to.trim() || to.trim() === path}
-            label="Move"
-            testid="move-submit"
-            onCancel={onClose}
-          />
-        </Form>
-      )}
-    </Dialog>
-  );
-}
-
-export function DeleteDialog({
+export function DeleteAlert({
   vdirId,
   entry,
   path,
@@ -287,36 +233,37 @@ export function DeleteDialog({
     }
   };
 
-  return (
-    <Dialog title={`Delete ${entry.name}`} onClose={onClose}>
-      {failure ? (
-        <DialogFailure
+  if (failure) {
+    return (
+      <Alert
+        title="Delete failed"
+        confirmLabel="Close"
+        onCancel={onClose}
+        onConfirm={onClose}
+        confirmTestid="delete-close"
+      >
+        <FailureState
           failure={failure}
           onRetry={failure.kind === "retryable" ? () => void submit() : undefined}
-          onClose={onClose}
         />
-      ) : (
-        <div>
-          <p className="text-sm text-gray-700">
-            Delete <span className="font-medium">{entry.name}</span>
-            {entry.dir ? " and everything inside it" : ""}? This cannot be undone.
-          </p>
-          <div className="flex items-center justify-end gap-2">
-            <button type="button" onClick={onClose} className={cancelCls}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              data-testid="delete-confirm"
-              onClick={() => void submit()}
-              className="mt-4 rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
-            >
-              Delete
-            </button>
-          </div>
-        </div>
-      )}
-    </Dialog>
+      </Alert>
+    );
+  }
+
+  return (
+    <Alert
+      title={`Delete “${entry.name}”?`}
+      message={
+        <>
+          {entry.dir ? "Everything inside it will be deleted. " : ""}This cannot be undone.
+        </>
+      }
+      confirmLabel="Delete"
+      destructive
+      busy={busy}
+      onCancel={onClose}
+      onConfirm={() => void submit()}
+      confirmTestid="delete-confirm"
+    />
   );
 }

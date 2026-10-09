@@ -1,5 +1,5 @@
-// Breadcrumb navigation (web-ui spec): vdir root + one link per path
-// segment; the current segment is not a link (aria-current).
+// Breadcrumb path (web-ui spec): vdir root + one tappable link per
+// path segment; the current segment is not a link (aria-current).
 
 import { Link } from "react-router";
 import { browseUrl, pathSegments } from "../lib/listing";
@@ -15,34 +15,32 @@ export function Breadcrumbs({
 }) {
   const segments = pathSegments(path);
   return (
-    <nav aria-label="Breadcrumb" data-testid="breadcrumbs" className="px-3 py-2">
-      <ol className="flex flex-wrap items-center gap-1 text-sm text-gray-600">
-        <li>
-          <Link
-            to={browseUrl(vdirId, "")}
-            aria-current={segments.length === 0 ? "page" : undefined}
-            className="font-medium text-blue-700 hover:underline"
-          >
-            {vdirName || vdirId}
-          </Link>
-        </li>
-        {segments.map((segment, i) => (
-          <li key={segment.path} className="flex items-center gap-1">
-            <span aria-hidden="true" className="text-gray-400">
-              /
+    <nav
+      aria-label="Breadcrumb"
+      data-testid="breadcrumbs"
+      className="truncate text-[12px] font-medium text-ios-secondary/70"
+    >
+      <Link
+        to={browseUrl(vdirId, "")}
+        aria-current={segments.length === 0 ? "page" : undefined}
+        className="hover:text-ios-blue"
+      >
+        {vdirName || vdirId}
+      </Link>
+      {segments.map((segment, i) => (
+        <span key={segment.path}>
+          <span className="mx-1 text-ios-secondary/30">/</span>
+          {i === segments.length - 1 ? (
+            <span aria-current="page" className="font-semibold text-ios-label">
+              {segment.name}
             </span>
-            {i === segments.length - 1 ? (
-              <span aria-current="page" className="text-gray-800">
-                {segment.name}
-              </span>
-            ) : (
-              <Link to={browseUrl(vdirId, segment.path)} className="text-blue-700 hover:underline">
-                {segment.name}
-              </Link>
-            )}
-          </li>
-        ))}
-      </ol>
+          ) : (
+            <Link to={browseUrl(vdirId, segment.path)} className="hover:text-ios-blue">
+              {segment.name}
+            </Link>
+          )}
+        </span>
+      ))}
     </nav>
   );
 }

@@ -1,21 +1,10 @@
-// Persistent upload status panel (upload-queue spec, design D2/D6):
-// mounted in the app shell so the queue's items, progress, and
-// pause/cancel/retry controls stay reachable on every authenticated
-// screen.
+// Upload queue view (upload-queue spec, design D8): the queue's items,
+// progress, lifecycle state, and pause/cancel/retry controls, rendered
+// on the Uploads destination. The queue singleton is unchanged.
 
 import { uploadQueue, type UploadItem, type UploadQueue } from "../lib/uploadQueue";
 import { useUploadQueue } from "../lib/useUploadQueue";
-
-const STATE_LABEL: Record<UploadItem["state"], string> = {
-  queued: "Queued",
-  running: "Uploading",
-  paused: "Paused",
-  completed: "Done",
-  canceled: "Canceled",
-  failed: "Failed",
-};
-
-const controlCls = "rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50";
+import { CircleCheckIcon, CircleXIcon, PauseIcon, PlayIcon, RefreshIcon, WarningIcon, DocIcon } from "./icons";
 
 function percent(item: UploadItem): number {
   if (item.state === "completed") return 100;
@@ -27,77 +16,126 @@ function isActive(state: UploadItem["state"]): boolean {
   return state === "queued" || state === "running" || state === "paused";
 }
 
+function statusText(item: UploadItem): string {
+  const pct = percent(item);
+  if (item.state === "running") return pct >= 100 ? "Finishing… (awaiting server confirm)" : `Uploading · ${pct}%`;
+  if (item.state === "paused") return `Paused · ${pct}%`;
+  if (item.state === "completed") return "Done";
+  if (item.state === "failed") return "Failed";
+  if (item.state === "canceled") return "Canceled";
+  return "Queued";
+}
+
+function ItemIcon({ item }: { item: UploadItem }) {
+  const tone =
+    item.state === "failed"
+      ? "bg-rose-50 text-ios-red"
+      : item.state === "completed"
+        ? "bg-emerald-50 text-ios-green"
+        : "bg-ios-blue/10 text-ios-blue";
+  const Icon = item.state === "failed" ? WarningIcon : item.state === "completed" ? CircleCheckIcon : DocIcon;
+  return (
+    <span className={`flex h-9 w-9 items-center justify-center rounded-xl text-sm ${tone}`}>
+      <Icon />
+    </span>
+  );
+}
+
 export function UploadPanel({ queue = uploadQueue }: { queue?: UploadQueue } = {}) {
   const { items, paused } = useUploadQueue(queue);
+  const active = items.filter((it) => isActive(it.state)).length;
 
   return (
-    <section
-      data-testid="upload-panel"
-      aria-label="Uploads"
-      className="fixed bottom-0 right-0 z-30 m-3 w-80 max-w-[calc(100vw-1.5rem)] rounded-lg border border-gray-200 bg-white shadow-lg"
-    >
-      <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2">
-        <h2 className="text-sm font-semibold text-gray-800">
-          Uploads{items.length > 0 ? ` (${items.length})` : ""}
-        </h2>
+    <section data-testid="upload-panel" aria-label="Uploads" className="flex min-h-dvh flex-col">
+      <div className="flex items-center justify-between px-5 pt-3 pb-2">
+        <h1 className="text-[34px] font-bold leading-tight tracking-tight text-ios-label">Uploads</h1>
         {items.length > 0 && (
           <button
             type="button"
             data-testid="queue-toggle"
             onClick={() => (paused ? queue.resume() : queue.pause())}
-            className={controlCls}
+            className="flex items-center gap-1.5 rounded-full border border-ios-separator bg-ios-card px-3 py-1.5 text-xs font-semibold text-ios-blue shadow-sm"
           >
-            {paused ? "Resume" : "Pause"}
+            {paused ? <PlayIcon /> : <PauseIcon />}
+            {paused ? "Resume All" : "Pause All"}
           </button>
         )}
       </div>
 
       {items.length === 0 ? (
-        <p data-testid="upload-empty" className="px-3 py-2 text-sm text-gray-500">
-          No uploads.
-        </p>
+        <div data-testid="upload-empty" className="flex flex-1 flex-col items-center px-6 py-12 text-center">
+          <span className="mb-4 flex h-20 w-20 items-center justify-center rounded-3xl bg-ios-blue/10 text-3xl text-ios-blue">
+            <DocIcon />
+          </span>
+          <p className="text-lg font-semibold text-ios-label">No uploads</p>
+          <p className="mt-1 max-w-xs text-sm text-ios-secondary/60">
+            Uploads from the Files tab appear here — they keep going while you use the app.
+          </p>
+        </div>
       ) : (
-        <ul className="max-h-64 divide-y divide-gray-100 overflow-auto">
+        <ul className="flex-1 space-y-3 px-4 pb-24">
           {items.map((item) => (
-            <li key={item.id} data-testid="upload-item" className="px-3 py-2">
-              <div className="flex items-center gap-2">
-                <span data-testid="upload-name" className="min-w-0 flex-1 truncate text-sm">
-                  {item.name}
-                </span>
-                <span data-testid="upload-state" className="text-xs text-gray-500">
-                  {STATE_LABEL[item.state]}
-                </span>
-              </div>
-              <progress
-                data-testid="upload-progress"
-                value={percent(item)}
-                max={100}
-                className="mt-1 h-1 w-full"
-              />
-              <div className="mt-1 flex items-center gap-2">
+            <li
+              key={item.id}
+              data-testid="upload-item"
+              className="rounded-2xl border border-black/5 bg-ios-card p-4 shadow-sm"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <ItemIcon item={item} />
+                  <div className="min-w-0">
+                    <p data-testid="upload-name" className="truncate text-sm font-semibold text-ios-label">
+                      {item.name}
+                    </p>
+                    <p
+                      data-testid="upload-state"
+                      className={`text-xs font-medium ${
+                        item.state === "failed"
+                          ? "text-ios-red"
+                          : item.state === "completed"
+                            ? "text-ios-green"
+                            : "text-ios-blue"
+                      }`}
+                    >
+                      {statusText(item)}
+                    </p>
+                  </div>
+                </div>
                 {isActive(item.state) && (
                   <button
                     type="button"
                     data-testid="upload-cancel"
+                    aria-label={`Cancel ${item.name}`}
                     onClick={() => queue.cancel(item.id)}
-                    className={controlCls}
+                    className="shrink-0 rounded-full p-1 text-ios-secondary/50 hover:bg-black/5"
                   >
-                    Cancel
+                    <CircleXIcon className="text-lg" />
                   </button>
                 )}
                 {(item.state === "failed" || item.state === "canceled") && (
                   <button
                     type="button"
                     data-testid="upload-retry"
+                    aria-label={`Retry ${item.name}`}
                     onClick={() => queue.retry(item.id)}
-                    className={controlCls}
+                    className="shrink-0 rounded-full p-1 text-ios-blue hover:bg-ios-blue/10"
                   >
-                    Retry
+                    <RefreshIcon className="text-lg" />
                   </button>
                 )}
               </div>
+
+              {item.state !== "failed" && item.state !== "canceled" && (
+                <progress
+                  data-testid="upload-progress"
+                  value={percent(item)}
+                  max={100}
+                  className="mt-3 h-1.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-ios-separator [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-ios-blue [&::-moz-progress-bar]:bg-ios-blue"
+                />
+              )}
+
               {item.error && (
-                <p role="alert" data-testid="upload-error" className="mt-1 text-xs text-red-600">
+                <p role="alert" data-testid="upload-error" className="mt-2 text-xs text-ios-red">
                   {item.error}
                 </p>
               )}
@@ -105,6 +143,7 @@ export function UploadPanel({ queue = uploadQueue }: { queue?: UploadQueue } = {
           ))}
         </ul>
       )}
+      <span className="sr-only">{active} active uploads</span>
     </section>
   );
 }

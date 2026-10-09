@@ -1,27 +1,41 @@
-// Browse view (design D5): one vdir's directory listing at the splat
-// path — breadcrumbs, list/grid toggle, sorting, virtualized entries;
-// the deterministic error classes render as distinct states with a
-// retry action on 503 (reload).
+// Browse view (web-ui spec, design D4/D9): one vdir's directory listing
+// at the splat path — iOS nav bar with back control and breadcrumb
+// path, a compact toolbar (sort, list/grid toggle, writer-only New /
+// Upload), virtualized list/grid entries, a long-press context menu,
+// and the file-operation overlays. The deterministic error classes
+// render as distinct states with a retry action on 503.
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { ls, type LsEntry } from "../lib/filesApi";
-import { browseUrl, decodeSplat, joinPath, sortEntries, type SortDir, type SortKey } from "../lib/listing";
+import {
+  browseUrl,
+  decodeSplat,
+  joinPath,
+  parentPath,
+  previewUrl,
+  sortEntries,
+  type SortDir,
+  type SortKey,
+} from "../lib/listing";
 import { listVdirs, toApiFailure, type VdirRecord } from "../lib/records";
 import { uploadQueue } from "../lib/uploadQueue";
 import { useVdirRole } from "../lib/useVdirRole";
 import { Breadcrumbs } from "../components/Breadcrumbs";
-import { DeleteDialog, MkdirDialog, MoveDialog, RenameDialog } from "../components/FileOpsDialogs";
+import { ContextMenu } from "../components/ContextMenu";
+import { DeleteAlert, MkdirSheet, RenameSheet } from "../components/FileOpsDialogs";
 import { EmptyState, FailureState, Spinner } from "../components/Errors";
 import { EntryGrid, EntryList } from "../components/EntryViews";
-import type { EntryActionHandlers } from "../components/EntryLinks";
+import { ChevronLeftIcon, FolderPlusIcon, GridIcon, ListIcon, SortIcon, UploadIcon } from "../components/icons";
 import type { ApiFailure } from "../lib/filesApi";
 
 type ViewMode = "list" | "grid";
 
 type FileOp =
   | { kind: "mkdir" }
-  | { kind: "rename" | "move" | "delete"; entry: LsEntry; path: string };
+  | { kind: "rename" | "delete"; entry: LsEntry; path: string };
+
+type MenuState = { entry: LsEntry; path: string };
 
 function loadView(): ViewMode {
   return localStorage.getItem("sf.view") === "grid" ? "grid" : "list";
@@ -48,8 +62,14 @@ export function BrowsePage() {
 
   const [vdir, setVdir] = useState<VdirRecord | null>(null);
   const [op, setOp] = useState<FileOp | null>(null);
+  const [menu, setMenu] = useState<MenuState | null>(null);
   const { canWrite } = useVdirRole(vdir);
   const vdirName = vdir?.name ?? "";
+
+  const currentName = useMemo(() => {
+    const segs = path.split("/").filter(Boolean);
+    return segs.length > 0 ? segs[segs.length - 1] : vdirName;
+  }, [path, vdirName]);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,8 +101,8 @@ export function BrowsePage() {
         if (!cancelled) setVdir(all.find((v) => v.id === vdirId) ?? null);
       })
       .catch(() => {
-        // The switcher surfaces vdir-list failures; here the record is
-        // only used for the name and the write-permission derivation.
+        // The Locations list surfaces vdir-list failures; here the
+        // record only drives the name and write-permission derivation.
       });
     return () => {
       cancelled = true;
@@ -96,8 +116,6 @@ export function BrowsePage() {
     setView(mode);
     localStorage.setItem("sf.view", mode);
   };
-
-  const toggleDirection = () => setSortDir((d) => (d === "asc" ? "desc" : "asc"));
 
   const reload = () => setAttempt((n) => n + 1);
   const finishOp = () => {
@@ -114,58 +132,110 @@ export function BrowsePage() {
     e.target.value = "";
   };
 
-  const handlers: EntryActionHandlers = {
-    canWrite,
-    onRename: (entry, entryPath) => setOp({ kind: "rename", entry, path: entryPath }),
-    onMove: (entry, entryPath) => setOp({ kind: "move", entry, path: entryPath }),
-    onDelete: (entry, entryPath) => setOp({ kind: "delete", entry, path: entryPath }),
+  const openDir = (next: string) => void navigate(browseUrl(vdirId ?? "", next));
+  const openPreview = (_entry: LsEntry, entryPath: string) =>
+    void navigate(previewUrl(vdirId ?? "", entryPath));
+  const startMove = (entry: LsEntry, entryPath: string) => {
+    setMenu(null);
+    void navigate(`/v/${vdirId}/move`, { state: { entry, path: entryPath } });
+  };
+
+  const goBack = () => {
+    if (!path) void navigate("/files");
+    else void navigate(browseUrl(vdirId ?? "", parentPath(path)));
   };
 
   return (
-    <div className="flex h-[calc(100dvh-3.5rem)] flex-col">
-      <Breadcrumbs vdirId={vdirId ?? ""} vdirName={vdirName} path={path} />
+    <div className="flex h-full flex-col">
+      <div className="px-4 pt-1 pb-2">
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            data-testid="back"
+            onClick={goBack}
+            className="flex items-center text-base text-ios-blue"
+          >
+            <ChevronLeftIcon className="mr-0.5 text-sm" />
+            {path ? "Back" : "Files"}
+          </button>
+          <span className="text-xs text-ios-secondary/50">SSH connected</span>
+        </div>
+        <h1 className="mt-0.5 text-[30px] font-bold leading-tight tracking-tight text-ios-label">
+          {currentName}
+        </h1>
+        <Breadcrumbs vdirId={vdirId ?? ""} vdirName={vdirName} path={path} />
+      </div>
 
-      <div className="flex items-center gap-2 border-b border-gray-200 px-3 py-2" data-testid="toolbar">
-        <label htmlFor="sort-key" className="text-sm text-gray-500">
-          Sort
-        </label>
-        <select
-          id="sort-key"
-          data-testid="sort-key"
-          value={sortKey}
-          onChange={(e) => setSortKey(e.target.value as SortKey)}
-          className="rounded border border-gray-300 px-2 py-1 text-sm"
-        >
-          <option value="name">Name</option>
-          <option value="size">Size</option>
-          <option value="modified">Modified</option>
-        </select>
-        <button
-          type="button"
-          data-testid="sort-direction"
-          onClick={toggleDirection}
-          aria-label={sortDir === "asc" ? "Sorted ascending; switch to descending" : "Sorted descending; switch to ascending"}
-          className="rounded border border-gray-300 px-2 py-1 text-sm hover:bg-gray-50"
-        >
-          {sortDir === "asc" ? "↑ Asc" : "↓ Desc"}
-        </button>
+      <div
+        className="flex items-center justify-between gap-2 border-y border-ios-separator bg-ios-bg px-4 py-2 text-xs"
+        data-testid="toolbar"
+      >
+        <div className="flex items-center gap-2">
+          <span className="flex items-center gap-1.5 rounded-lg border border-ios-separator bg-ios-card px-2.5 py-1.5 font-medium text-ios-label shadow-sm">
+            <SortIcon className="text-ios-blue" />
+            <select
+              id="sort-key"
+              data-testid="sort-key"
+              aria-label="Sort by"
+              value={sortKey}
+              onChange={(e) => setSortKey(e.target.value as SortKey)}
+              className="bg-transparent outline-none"
+            >
+              <option value="name">Name</option>
+              <option value="size">Size</option>
+              <option value="modified">Modified</option>
+            </select>
+          </span>
+          <button
+            type="button"
+            data-testid="sort-direction"
+            onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+            aria-label={sortDir === "asc" ? "Sorted ascending; switch to descending" : "Sorted descending; switch to ascending"}
+            className="rounded-lg border border-ios-separator bg-ios-card px-2.5 py-1.5 font-medium text-ios-label shadow-sm"
+          >
+            {sortDir === "asc" ? "A→Z" : "Z→A"}
+          </button>
+          <span className="flex rounded-lg bg-ios-separator p-0.5">
+            <button
+              type="button"
+              data-testid="view-list"
+              aria-pressed={view === "list"}
+              onClick={() => switchView("list")}
+              aria-label="List view"
+              className={`rounded-md px-2 py-1 ${view === "list" ? "bg-ios-card text-ios-label shadow-sm" : "text-ios-secondary/70"}`}
+            >
+              <ListIcon />
+            </button>
+            <button
+              type="button"
+              data-testid="view-grid"
+              aria-pressed={view === "grid"}
+              onClick={() => switchView("grid")}
+              aria-label="Grid view"
+              className={`rounded-md px-2 py-1 ${view === "grid" ? "bg-ios-card text-ios-label shadow-sm" : "text-ios-secondary/70"}`}
+            >
+              <GridIcon />
+            </button>
+          </span>
+        </div>
+
         {canWrite && (
-          <>
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
               data-testid="new-folder"
               onClick={() => setOp({ kind: "mkdir" })}
-              className="rounded border border-gray-300 px-2 py-1 text-sm hover:bg-gray-50"
+              className="flex items-center gap-1 rounded-full border border-ios-separator bg-ios-card px-2.5 py-1.5 font-medium text-ios-label shadow-sm"
             >
-              New folder
+              <FolderPlusIcon className="text-ios-blue" /> New
             </button>
             <button
               type="button"
               data-testid="upload-button"
               onClick={() => uploadInput.current?.click()}
-              className="rounded border border-gray-300 px-2 py-1 text-sm hover:bg-gray-50"
+              className="flex items-center gap-1 rounded-full bg-ios-blue px-3 py-1.5 font-medium text-white shadow-sm"
             >
-              Upload
+              <UploadIcon /> Upload
             </button>
             <input
               ref={uploadInput}
@@ -175,28 +245,8 @@ export function BrowsePage() {
               onChange={onUpload}
               className="hidden"
             />
-          </>
+          </div>
         )}
-        <span className="ml-auto flex overflow-hidden rounded border border-gray-300 text-sm">
-          <button
-            type="button"
-            data-testid="view-list"
-            aria-pressed={view === "list"}
-            onClick={() => switchView("list")}
-            className={`px-3 py-1 ${view === "list" ? "bg-blue-50 text-blue-700" : "hover:bg-gray-50"}`}
-          >
-            List
-          </button>
-          <button
-            type="button"
-            data-testid="view-grid"
-            aria-pressed={view === "grid"}
-            onClick={() => switchView("grid")}
-            className={`px-3 py-1 ${view === "grid" ? "bg-blue-50 text-blue-700" : "hover:bg-gray-50"}`}
-          >
-            Grid
-          </button>
-        </span>
       </div>
 
       <div className="min-h-0 flex-1">
@@ -211,53 +261,69 @@ export function BrowsePage() {
             vdirId={vdirId ?? ""}
             entries={sorted}
             paths={paths}
-            onOpenDir={(next) => navigate(browseUrl(vdirId ?? "", next))}
-            handlers={handlers}
+            onOpenDir={openDir}
+            onPreview={openPreview}
+            onMenu={(entry, entryPath) => setMenu({ entry, path: entryPath })}
           />
         ) : (
           <EntryGrid
             vdirId={vdirId ?? ""}
             entries={sorted}
             paths={paths}
-            onOpenDir={(next) => navigate(browseUrl(vdirId ?? "", next))}
-            handlers={handlers}
+            onOpenDir={openDir}
+            onPreview={openPreview}
+            onMenu={(entry, entryPath) => setMenu({ entry, path: entryPath })}
           />
         )}
       </div>
 
-      {op?.kind === "mkdir" && (
-        <MkdirDialog vdirId={vdirId ?? ""} dir={path} onClose={() => setOp(null)} onDone={finishOp} />
+      {menu && (
+        <ContextMenu
+          vdirId={vdirId ?? ""}
+          entry={menu.entry}
+          path={menu.path}
+          canWrite={canWrite}
+          onOpenDir={(p) => {
+            setMenu(null);
+            openDir(p);
+          }}
+          onPreview={(entry, p) => {
+            setMenu(null);
+            openPreview(entry, p);
+          }}
+          onRename={(entry, p) => {
+            setMenu(null);
+            setOp({ kind: "rename", entry, path: p });
+          }}
+          onMove={startMove}
+          onDelete={(entry, p) => {
+            setMenu(null);
+            setOp({ kind: "delete", entry, path: p });
+          }}
+          onClose={() => setMenu(null)}
+        />
       )}
-      {(op?.kind === "rename" || op?.kind === "move" || op?.kind === "delete") && (
-        <>
-          {op.kind === "rename" && (
-            <RenameDialog
-              vdirId={vdirId ?? ""}
-              entry={op.entry}
-              path={op.path}
-              onClose={() => setOp(null)}
-              onDone={finishOp}
-            />
-          )}
-          {op.kind === "move" && (
-            <MoveDialog
-              vdirId={vdirId ?? ""}
-              entry={op.entry}
-              path={op.path}
-              onClose={() => setOp(null)}
-              onDone={finishOp}
-            />
-          )}
-          {op.kind === "delete" && (
-            <DeleteDialog
-              vdirId={vdirId ?? ""}
-              entry={op.entry}
-              path={op.path}
-              onClose={() => setOp(null)}
-              onDone={finishOp}
-            />
-          )}
-        </>
+
+      {op?.kind === "mkdir" && (
+        <MkdirSheet vdirId={vdirId ?? ""} dir={path} onClose={() => setOp(null)} onDone={finishOp} />
+      )}
+      {op?.kind === "rename" && (
+        <RenameSheet
+          vdirId={vdirId ?? ""}
+          entry={op.entry}
+          path={op.path}
+          onClose={() => setOp(null)}
+          onDone={finishOp}
+        />
+      )}
+      {op?.kind === "delete" && (
+        <DeleteAlert
+          vdirId={vdirId ?? ""}
+          entry={op.entry}
+          path={op.path}
+          onClose={() => setOp(null)}
+          onDone={finishOp}
+        />
       )}
     </div>
   );

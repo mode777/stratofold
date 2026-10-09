@@ -1,1 +1,53 @@
 @import "tailwindcss";
+
+/*
+ * Stratofold iOS design tokens (change replace-web-ui-with-ios-mobile,
+ * design D1). Components consume semantic utilities (bg-ios-bg,
+ * text-ios-blue, ...), never raw hex. Light mode only.
+ */
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "Helvetica Neue", Helvetica, Arial, sans-serif;
+
+  --color-ios-bg: #f2f2f7;
+  --color-ios-card: #ffffff;
+  --color-ios-blue: #007aff;
+  --color-ios-red: #ff3b30;
+  --color-ios-green: #34c759;
+  --color-ios-separator: #e5e5ea;
+  --color-ios-label: #000000;
+  --color-ios-secondary: #3c3c43;
+  --color-ios-tertiary: #8e8e93;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--color-ios-bg);
+    color: var(--color-ios-label);
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* Safe-area helpers (design D1): the tab bar and full-screen sheets sit
+ * inside the home-indicator/notch insets. */
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@utility no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}

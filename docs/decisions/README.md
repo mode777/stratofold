@@ -17,6 +17,7 @@ directory holds only what stays true after a change is archived.
 | 0005 | Accepted | SPA: React + Vite + TypeScript + Tailwind |
 | 0006 | Accepted | Release images build in CI on `v*` tags and publish to Harbor |
 | 0007 | Accepted | Optional pinned host key with trust on first use |
+| 0008 | Accepted | iOS-style mobile-first SPA shell and design system |
 
 ## Adding a decision
 

@@ -83,6 +83,15 @@ export function browseUrl(vdirId: string, path: string): string {
   return `/v/${encodeURIComponent(vdirId)}${segments.length ? "/" + segments.join("/") : ""}`;
 }
 
+// previewUrl builds the pushed preview route for a non-media file.
+export function previewUrl(vdirId: string, path: string): string {
+  const segments = path
+    .split("/")
+    .filter((s) => s.length > 0)
+    .map((s) => encodeURIComponent(s));
+  return `/v/${encodeURIComponent(vdirId)}/view${segments.length ? "/" + segments.join("/") : ""}`;
+}
+
 // decodeSplat turns a raw splat pathname tail into the virtual path,
 // decoding each segment once (React Router does not decode splats).
 export function decodeSplat(raw: string): string {

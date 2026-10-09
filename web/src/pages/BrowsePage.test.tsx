@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowsePage } from "./BrowsePage";
+import { PreviewPage } from "./PreviewPage";
+import { MovePickerPage } from "./MovePickerPage";
 import { pb } from "../lib/pb";
 import { collectionList, installFetchMock, installPbMock, jsonResponse } from "../test/mockApi";
 import type { LsEntry } from "../lib/filesApi";
@@ -26,7 +28,6 @@ function entry(name: string, over: Partial<LsEntry> = {}): LsEntry {
   return { name, size: 0, dir: false, modtime: "2026-01-02T03:04:05Z", ...over };
 }
 
-// lsRoutes maps virtual path -> entries (or an error response).
 function lsRouter(vdirId: string, byPath: Record<string, LsEntry[] | Response>) {
   return (url: string, init?: RequestInit) => {
     if (url !== `/api/sf/vdirs/${vdirId}/ls` || init?.method !== "POST") return undefined;
@@ -42,7 +43,10 @@ function renderBrowse(path = "") {
   return render(
     <MemoryRouter initialEntries={[`/v/v1${path ? "/" + path : ""}`]}>
       <Routes>
+        <Route path="/v/:vdirId/view/*" element={<PreviewPage />} />
+        <Route path="/v/:vdirId/move" element={<MovePickerPage />} />
         <Route path="/v/:vdirId/*" element={<BrowsePage />} />
+        <Route path="/files" element={<div>files destination</div>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -72,13 +76,14 @@ describe("directory listing", () => {
     renderBrowse();
 
     const first = await screen.findByTestId("entry-0");
-    // Directories sort first, then files by name.
     expect(within(first).getByText("docs")).toBeInTheDocument();
-    expect(within(first).getByTestId("entry-size")).toHaveTextContent("—");
+    // Folders carry no size cell.
+    expect(within(first).queryByTestId("entry-size")).not.toBeInTheDocument();
     expect(within(await screen.findByTestId("entry-1")).getByText("a.txt")).toBeInTheDocument();
-    expect(within(screen.getByTestId("entry-2")).getByText("b.txt")).toBeInTheDocument();
-    expect(within(screen.getByTestId("entry-2")).getByTestId("entry-size")).toHaveTextContent("2.0 KB");
-    expect(within(screen.getByTestId("entry-2")).getByTestId("entry-modtime")).toHaveTextContent("2026");
+    const second = screen.getByTestId("entry-2");
+    expect(within(second).getByText("b.txt")).toBeInTheDocument();
+    expect(within(second).getByTestId("entry-size")).toHaveTextContent("2.0 KB");
+    expect(within(second).getByText(/2026/)).toBeInTheDocument();
   });
 
   it("switches between list and grid without losing the directory", async () => {
@@ -104,17 +109,14 @@ describe("directory listing", () => {
     await screen.findByTestId("entry-0");
 
     const user = userEvent.setup();
-    // Size ascending: dir first, then a.txt (10), b.txt (2048).
     await user.selectOptions(screen.getByTestId("sort-key"), "size");
     await waitFor(() => expect(screen.getByTestId("entry-1")).toHaveTextContent("a.txt"));
     expect(screen.getByTestId("entry-2")).toHaveTextContent("b.txt");
 
-    // Flip to descending: b.txt before a.txt.
     await user.click(screen.getByTestId("sort-direction"));
     await waitFor(() => expect(screen.getByTestId("entry-1")).toHaveTextContent("b.txt"));
     expect(screen.getByTestId("entry-2")).toHaveTextContent("a.txt");
 
-    // Name descending: docs still first (dirs before files), then b.txt, a.txt.
     await user.selectOptions(screen.getByTestId("sort-key"), "name");
     await waitFor(() => expect(screen.getByTestId("entry-1")).toHaveTextContent("b.txt"));
     expect(screen.getByTestId("entry-2")).toHaveTextContent("a.txt");
@@ -125,10 +127,7 @@ describe("navigation and states", () => {
   it("enters a subdirectory and updates breadcrumbs", async () => {
     installPbMock([collectionList("vdirs", [MINE])]);
     installFetchMock([
-      lsRouter("v1", {
-        "": SAMPLE,
-        docs: [entry("inner.txt", { size: 1 })],
-      }),
+      lsRouter("v1", { "": SAMPLE, docs: [entry("inner.txt", { size: 1 })] }),
     ]);
     renderBrowse();
     await screen.findByTestId("entry-0");
@@ -139,20 +138,22 @@ describe("navigation and states", () => {
     await waitFor(() => expect(screen.getByTestId("entry-0")).toHaveTextContent("inner.txt"));
   });
 
-  it("navigates back via a breadcrumb segment", async () => {
+  it("navigates back via a breadcrumb segment and via the back control", async () => {
     installPbMock([collectionList("vdirs", [MINE])]);
     installFetchMock([
-      lsRouter("v1", {
-        "": SAMPLE,
-        "docs/sub": [entry("deep.txt", { size: 1 })],
-      }),
+      lsRouter("v1", { "": SAMPLE, "docs/sub": [entry("deep.txt", { size: 1 })] }),
     ]);
     renderBrowse("docs/sub");
     await waitFor(() => expect(screen.getByTestId("breadcrumbs")).toHaveTextContent("sub"));
 
-    // Click the root breadcrumb (vdir name).
     await userEvent.setup().click(within(screen.getByTestId("breadcrumbs")).getByText("Mine"));
     await waitFor(() => expect(screen.getByTestId("entry-0")).toHaveTextContent("docs"));
+
+    await userEvent.setup().click(within(screen.getByTestId("entry-0")).getByTestId("open-dir"));
+    await waitFor(() => expect(screen.getByTestId("breadcrumbs")).toHaveTextContent("docs"));
+    // The back control returns to the parent (the vdir root).
+    await userEvent.setup().click(screen.getByTestId("back"));
+    await waitFor(() => expect(screen.getByTestId("breadcrumbs")).toHaveTextContent("Mine"));
   });
 
   it("shows an empty state for an empty directory", async () => {
@@ -162,19 +163,14 @@ describe("navigation and states", () => {
     await waitFor(() => expect(screen.getByTestId("state-empty")).toHaveTextContent("empty"));
   });
 
-  it("shows the not-found state on a 404 and can go back", async () => {
+  it("shows the not-found state on a 404 and offers a way back", async () => {
     installPbMock([collectionList("vdirs", [MINE])]);
     installFetchMock([
-      lsRouter("v1", {
-        "": SAMPLE,
-        "missing": jsonResponse(404, { message: "Not found." }),
-      }),
+      lsRouter("v1", { "": SAMPLE, missing: jsonResponse(404, { message: "Not found." }) }),
     ]);
     renderBrowse("missing");
     await waitFor(() => expect(screen.getByTestId("state-notfound")).toBeInTheDocument());
-
-    // A way back: the root breadcrumb link is still offered.
-    expect(within(screen.getByTestId("breadcrumbs")).getByText("Mine")).toBeInTheDocument();
+    expect(screen.getByTestId("back")).toBeInTheDocument();
   });
 });
 
@@ -190,7 +186,7 @@ describe("virtualization", () => {
     expect(rendered().length).toBeLessThan(100);
 
     const scroll = screen.getByTestId("entry-scroll");
-    fireEvent.scroll(scroll, { target: { scrollTop: 10000 * 44 } });
+    fireEvent.scroll(scroll, { target: { scrollTop: 10000 * 56 } });
 
     await waitFor(() => {
       const names = screen.getAllByTestId(/^entry-\d+$/).map((el) => el.getAttribute("data-entry-name"));
@@ -207,11 +203,10 @@ describe("virtualization", () => {
 
     await userEvent.setup().click(screen.getByTestId("view-grid"));
     await waitFor(() => expect(screen.getByTestId("grid-row-0")).toBeInTheDocument());
-    const rows = screen.getAllByTestId(/^grid-row-\d+$/);
-    expect(rows.length).toBeLessThan(50);
+    expect(screen.getAllByTestId(/^grid-row-\d+$/).length).toBeLessThan(50);
 
     const scroll = screen.getByTestId("entry-scroll");
-    fireEvent.scroll(scroll, { target: { scrollTop: 2500 * 148 } });
+    fireEvent.scroll(scroll, { target: { scrollTop: 3334 * 148 } });
     await waitFor(() => {
       const names = screen.getAllByTestId(/^entry-\d+$/).map((el) => el.getAttribute("data-entry-name"));
       expect(names).toContain("file-9999.txt");
@@ -219,30 +214,38 @@ describe("virtualization", () => {
   });
 });
 
-describe("downloads and media links", () => {
-  it("wires plain /files URLs for download and media new-tab actions", async () => {
+describe("downloads, media, and preview", () => {
+  it("wires media new-tab and opens the preview for non-media files", async () => {
     installPbMock([collectionList("vdirs", [MINE])]);
     installFetchMock([
-      lsRouter("v1", {
-        "": [entry("movie.mp4", { size: 99 }), entry("notes.txt", { size: 1 })],
-      }),
+      lsRouter("v1", { "": [entry("movie.mp4", { size: 99 }), entry("notes.txt", { size: 1 })] }),
     ]);
     renderBrowse();
     await screen.findByTestId("entry-0");
 
-    // movie.mp4 sorts after notes.txt by name; find each by name.
     const movieRow = screen.getByText("movie.mp4").closest("[data-testid^='entry-']") as HTMLElement;
     const movieLink = within(movieRow).getByTestId("open-media");
     expect(movieLink).toHaveAttribute("href", "/files/v1/movie.mp4");
     expect(movieLink).toHaveAttribute("target", "_blank");
-    expect(within(movieRow).getByTestId("action-download")).toHaveAttribute("download");
-    expect(within(movieRow).getByTestId("action-open-tab")).toHaveAttribute("target", "_blank");
 
     const notesRow = screen.getByText("notes.txt").closest("[data-testid^='entry-']") as HTMLElement;
-    const notesLink = within(notesRow).getByTestId("download-link");
-    expect(notesLink).toHaveAttribute("href", "/files/v1/notes.txt");
-    expect(notesLink).toHaveAttribute("download");
-    expect(within(notesRow).queryByTestId("open-media")).not.toBeInTheDocument();
+    await userEvent.setup().click(within(notesRow).getByTestId("open-preview"));
+
+    await waitFor(() => expect(screen.getByTestId("preview")).toHaveTextContent("notes.txt"));
+    expect(screen.getByTestId("preview-download")).toHaveAttribute("href", "/files/v1/notes.txt");
+  });
+
+  it("offers a Download action in the context menu through the /files URL", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    installFetchMock([lsRouter("v1", { "": SAMPLE })]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+
+    const row = screen.getByText("a.txt").closest("[data-testid^='entry-']") as HTMLElement;
+    await userEvent.setup().click(within(row).getByTestId("entry-actions"));
+    const download = await screen.findByTestId("action-download");
+    expect(download).toHaveAttribute("href", "/files/v1/a.txt");
+    expect(download).toHaveAttribute("download");
   });
 });
 
@@ -276,6 +279,10 @@ function rowFor(name: string): HTMLElement {
   return screen.getByText(name).closest("[data-testid^='entry-']") as HTMLElement;
 }
 
+async function openMenu(name: string) {
+  await userEvent.setup().click(within(rowFor(name)).getByTestId("entry-actions"));
+}
+
 describe("file management actions", () => {
   it("offers write actions to the owner and completes a create-folder", async () => {
     installPbMock([collectionList("vdirs", [MINE])]);
@@ -293,7 +300,7 @@ describe("file management actions", () => {
 
     await waitFor(() => expect(calls).toContainEqual({ op: "mkdir", body: { path: "newdir" } }));
     await waitFor(() => expect(ls.count()).toBeGreaterThanOrEqual(2));
-    expect(screen.queryByTestId("mkdir-form")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("mkdir-name")).not.toBeInTheDocument();
   });
 
   it("renames an entry through mv", async () => {
@@ -303,37 +310,35 @@ describe("file management actions", () => {
     renderBrowse();
     await screen.findByTestId("entry-0");
 
-    const user = userEvent.setup();
-    await waitFor(() => expect(within(rowFor("a.txt")).getByTestId("action-rename")).toBeInTheDocument());
-    await user.click(within(rowFor("a.txt")).getByTestId("action-rename"));
+    await openMenu("a.txt");
+    await userEvent.setup().click(await screen.findByTestId("action-rename"));
     const input = await screen.findByTestId("rename-name");
-    await user.clear(input);
-    await user.type(input, "renamed.txt");
-    await user.click(screen.getByTestId("rename-submit"));
+    await userEvent.setup().clear(input);
+    await userEvent.setup().type(input, "renamed.txt");
+    await userEvent.setup().click(screen.getByTestId("rename-submit"));
 
-    await waitFor(() =>
-      expect(calls).toContainEqual({ op: "mv", body: { path: "a.txt", to: "renamed.txt" } }),
-    );
+    await waitFor(() => expect(calls).toContainEqual({ op: "mv", body: { path: "a.txt", to: "renamed.txt" } }));
   });
 
-  it("moves an entry to a destination path through mv", async () => {
+  it("opens the pushed move picker and moves an entry", async () => {
     installPbMock([collectionList("vdirs", [MINE])]);
     const calls: OpCall[] = [];
-    installFetchMock([opRouter("v1", calls), lsRouter("v1", { "": SAMPLE })]);
+    installFetchMock([
+      opRouter("v1", calls),
+      lsRouter("v1", { "": SAMPLE, docs: [entry("inner", { dir: true })] }),
+    ]);
     renderBrowse();
     await screen.findByTestId("entry-0");
 
-    const user = userEvent.setup();
-    await waitFor(() => expect(within(rowFor("a.txt")).getByTestId("action-move")).toBeInTheDocument());
-    await user.click(within(rowFor("a.txt")).getByTestId("action-move"));
-    const input = await screen.findByTestId("move-to");
-    await user.clear(input);
-    await user.type(input, "docs/a.txt");
-    await user.click(screen.getByTestId("move-submit"));
+    await openMenu("a.txt");
+    await userEvent.setup().click(await screen.findByTestId("action-move"));
 
-    await waitFor(() =>
-      expect(calls).toContainEqual({ op: "mv", body: { path: "a.txt", to: "docs/a.txt" } }),
-    );
+    // The move picker is a pushed screen listing folders only.
+    await waitFor(() => expect(screen.getByTestId("move-submit")).toBeInTheDocument());
+    await userEvent.setup().click(within(screen.getByTestId("move-folder")).getByText("docs"));
+    await userEvent.setup().click(screen.getByTestId("move-submit"));
+
+    await waitFor(() => expect(calls).toContainEqual({ op: "mv", body: { path: "a.txt", to: "docs/a.txt" } }));
   });
 
   it("deletes only after confirmation", async () => {
@@ -343,19 +348,16 @@ describe("file management actions", () => {
     renderBrowse();
     await screen.findByTestId("entry-0");
 
-    const user = userEvent.setup();
-    await waitFor(() => expect(within(rowFor("b.txt")).getByTestId("action-delete")).toBeInTheDocument());
-    await user.click(within(rowFor("b.txt")).getByTestId("action-delete"));
+    await openMenu("b.txt");
+    await userEvent.setup().click(await screen.findByTestId("action-delete"));
     await screen.findByTestId("delete-confirm");
 
-    // Declining leaves the entry untouched and issues no request.
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "Cancel" }));
     expect(calls).toHaveLength(0);
-    expect(rowFor("b.txt")).toBeInTheDocument();
 
-    // Confirming issues the rm.
-    await user.click(within(rowFor("b.txt")).getByTestId("action-delete"));
-    await user.click(await screen.findByTestId("delete-confirm"));
+    await openMenu("b.txt");
+    await userEvent.setup().click(await screen.findByTestId("action-delete"));
+    await userEvent.setup().click(await screen.findByTestId("delete-confirm"));
     await waitFor(() => expect(calls).toContainEqual({ op: "rm", body: { path: "b.txt" } }));
   });
 
@@ -371,8 +373,26 @@ describe("file management actions", () => {
 
     expect(screen.queryByTestId("new-folder")).not.toBeInTheDocument();
     expect(screen.queryByTestId("upload-input")).not.toBeInTheDocument();
-    expect(within(rowFor("a.txt")).queryByTestId("action-rename")).not.toBeInTheDocument();
-    expect(within(rowFor("a.txt")).queryByTestId("action-delete")).not.toBeInTheDocument();
+
+    await openMenu("a.txt");
+    const menu = await screen.findByTestId("context-menu");
+    expect(within(menu).queryByTestId("action-rename")).not.toBeInTheDocument();
+    expect(within(menu).queryByTestId("action-delete")).not.toBeInTheDocument();
+  });
+
+  it("offers write actions to an editor", async () => {
+    sessionState.userId = "u2";
+    installPbMock([
+      collectionList("vdirs", [MINE]),
+      collectionList("vdir_shares", [{ id: "s1", vdir: "v1", user: "u2", role: "editor" }]),
+    ]);
+    installFetchMock([lsRouter("v1", { "": SAMPLE })]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+
+    await waitFor(() => expect(screen.getByTestId("new-folder")).toBeInTheDocument());
+    await openMenu("a.txt");
+    expect(within(await screen.findByTestId("context-menu")).getByTestId("action-rename")).toBeInTheDocument();
   });
 
   it("enqueues selected files for the current directory without blocking the view", async () => {
@@ -389,22 +409,7 @@ describe("file management actions", () => {
     expect(enqueue.mock.calls[0][0]).toBe("v1");
     expect(enqueue.mock.calls[0][1]).toBe("docs");
     expect(enqueue.mock.calls[0][2]).toHaveLength(2);
-    // The view stays interactive after enqueueing.
     expect(screen.getByTestId("upload-input")).toBeInTheDocument();
-  });
-
-  it("offers write actions to an editor", async () => {
-    sessionState.userId = "u2";
-    installPbMock([
-      collectionList("vdirs", [MINE]),
-      collectionList("vdir_shares", [{ id: "s1", vdir: "v1", user: "u2", role: "editor" }]),
-    ]);
-    installFetchMock([lsRouter("v1", { "": SAMPLE })]);
-    renderBrowse();
-    await screen.findByTestId("entry-0");
-
-    await waitFor(() => expect(screen.getByTestId("new-folder")).toBeInTheDocument());
-    expect(within(rowFor("a.txt")).getByTestId("action-rename")).toBeInTheDocument();
   });
 });
 

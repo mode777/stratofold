@@ -5,7 +5,7 @@
 // a local one.
 
 import { expect, test } from "@playwright/test";
-import { login, OWNER } from "./helpers";
+import { login, nav, OWNER } from "./helpers";
 
 test.describe("connection setup", () => {
   test("a connection without a fingerprint seeds the vdir root path", async ({ page }) => {
@@ -18,7 +18,8 @@ test.describe("connection setup", () => {
     await login(page, OWNER);
 
     // Create a connection leaving the fingerprint empty.
-    await page.getByRole("link", { name: "Connections", exact: true }).click();
+    await nav(page, "settings");
+    await page.getByTestId("settings-connections").click();
     await page.getByTestId("new-connection").click();
     await page.getByLabel("Label").fill(connLabel);
     await page.getByLabel("Host", { exact: true }).fill("127.0.0.1");
@@ -28,23 +29,20 @@ test.describe("connection setup", () => {
     // Host key fingerprint intentionally left empty (trust on first use).
     await page.getByTestId("connection-save").click();
 
-    await expect(
-      page.getByTestId("connection-row").filter({ hasText: connLabel }),
-    ).toContainText("/home/");
+    await expect(page.getByTestId("connection-row").filter({ hasText: connLabel })).toContainText("/home/");
 
-    // Creating a vdir on it prefills the root path from remote_dir.
-    await page.getByRole("link", { name: "Vdirs", exact: true }).click();
+    // Back to Settings, then into Virtual Directories.
+    await nav(page, "settings");
+    await page.getByTestId("settings-vdirs").click();
     await page.getByTestId("new-vdir").click();
     await page.getByLabel("Name").fill(vdirName);
 
     const select = page.getByTestId("v-connection");
     const value = await select.locator("option", { hasText: connLabel }).getAttribute("value");
     await select.selectOption(value!);
-    await expect(page.getByLabel("Root path")).toHaveValue("/home/");
+    await expect(page.getByLabel("Root Path")).toHaveValue("/home/");
 
     await page.getByTestId("vdir-save").click();
-    await expect(
-      page.getByTestId("vdir-row").filter({ hasText: vdirName }),
-    ).toContainText("/home/");
+    await expect(page.getByTestId("vdir-row").filter({ hasText: vdirName })).toContainText("/home/");
   });
 });

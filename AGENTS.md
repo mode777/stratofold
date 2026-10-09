@@ -115,7 +115,14 @@ see `docs/architecture.md`; finer details still follow.
   and the authz/revocation matrices in `./internal/fileserver/` +
   `./internal/fsapi/`.
 - **Web UI** (roadmap change 7): the SPA lives in the `web/` workspace
-  (Vite + React + TS + Tailwind, ADR 0005); root script shims are
+  (Vite + React + TS + Tailwind, ADR 0005) and is an iOS-style mobile
+  shell (ADR 0008): a translucent bottom tab bar below `md` and a
+  persistent sidebar at `md`+, with Files / Uploads / Settings
+  destinations. Routes: `/` → `/files` (Locations), `/v/:vdirId/*`
+  (browse), `/v/:vdirId/view/*` (preview), `/v/:vdirId/move` (move
+  picker), `/uploads`, `/settings`, `/settings/connections[/:id]`,
+  `/settings/vdirs[/:id[/sharing]]`; unknown routes show Page Not Found.
+  Root script shims are
   `npm run web` (dev server on 127.0.0.1:5173, proxying `/api` + `/files`
   to 127.0.0.1:8090), `web:build` (output `web/dist`), `web:test`
   (Vitest + Testing Library), `web:e2e` (Playwright). Login posts to
@@ -143,11 +150,15 @@ see `docs/architecture.md`; finer details still follow.
   gated by the signed-in user's effective role on the vdir (owner or
   `editor`) derived client-side in `web/src/lib/useVdirRole.ts` from the
   vdir's `owner` field or the user's own `vdir_shares` record — the
-  server still enforces independently. Mutations reuse the
-  `lib/filesApi.ts` `mkdir`/`mv`/`rm` wrappers and the dialogs map
+  server still enforces independently. Entry actions live in the
+  long-press / ellipsis context menu; new-folder and rename are bottom
+  sheets, delete is a destructive alert, and move is the pushed
+  `/v/:vdirId/move` picker. Mutations reuse the
+  `lib/filesApi.ts` `mkdir`/`mv`/`rm` wrappers and the overlays map
   failures to the existing error states. Uploads go through the in-app
-  manager (`web/src/lib/uploadQueue.ts` + `useUploadQueue`), mounted as
-  the status panel in `AppShell`: in-memory, FIFO, one upload at a time,
+  manager (`web/src/lib/uploadQueue.ts` + `useUploadQueue`), surfaced on
+  the Uploads destination plus a floating indicator on other
+  destinations: in-memory, FIFO, one upload at a time,
   survives in-app navigation, and exposes progress/pause/cancel/retry.
   The transport is `XMLHttpRequest` (upload progress + abort); a
   canceled or failed upload restarts from byte zero (no cross-request

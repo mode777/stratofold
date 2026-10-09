@@ -4,7 +4,7 @@
 // going while the user navigates away.
 
 import { expect, test } from "@playwright/test";
-import { GRANTEE, OWNER, entryRow, login, logout, openHome } from "./helpers";
+import { GRANTEE, OWNER, entryRow, login, logout, nav, openHome, openSharing } from "./helpers";
 
 test.describe("uploads", () => {
   test("small and large uploads report progress and survive navigation", async ({ page, context }) => {
@@ -17,8 +17,12 @@ test.describe("uploads", () => {
       mimeType: "text/plain",
       buffer: Buffer.from("small upload\n"),
     });
+    await nav(page, "uploads");
     const smallItem = page.getByTestId("upload-item").filter({ hasText: "small.txt" });
     await expect(smallItem).toContainText("Done");
+
+    // Back to Home for the large upload.
+    await openHome(page);
 
     // Throttle the browser's upload throughput so the large file is
     // genuinely mid-flight when the user navigates away.
@@ -36,13 +40,12 @@ test.describe("uploads", () => {
       mimeType: "application/octet-stream",
       buffer: Buffer.alloc(3 * 1024 * 1024, 7),
     });
-    const largeItem = page.getByTestId("upload-item").filter({ hasText: "large.bin" });
-    await expect(largeItem).toContainText("Uploading");
 
-    // Navigate away while it is still uploading (the R7 acceptance test).
-    await page.getByRole("link", { name: "Connections" }).click();
-    await expect(page.getByTestId("connections-page")).toBeVisible();
-    await expect(largeItem).toContainText("Uploading");
+    // Navigate away while it is still uploading (the R7 acceptance test):
+    // the Uploads destination stays reachable via the floating indicator.
+    await nav(page, "settings");
+    await expect(page.getByTestId("settings-page")).toBeVisible();
+    await expect(page.getByTestId("floating-upload-indicator")).toBeVisible();
 
     // Lift the throttle and confirm it still completes off-page.
     await cdp.send("Network.emulateNetworkConditions", {
@@ -51,11 +54,12 @@ test.describe("uploads", () => {
       downloadThroughput: -1,
       uploadThroughput: -1,
     });
+    await nav(page, "uploads");
+    const largeItem = page.getByTestId("upload-item").filter({ hasText: "large.bin" });
     await expect(largeItem).toContainText("Done", { timeout: 30_000 });
 
     // Back on Home, the published file is listed.
-    await page.getByRole("link", { name: "Stratofold" }).click();
-    await expect(page.getByTestId("breadcrumbs")).toContainText("Home");
+    await openHome(page);
     await expect(entryRow(page, "large.bin")).toBeVisible();
   });
 
@@ -78,6 +82,8 @@ test.describe("uploads", () => {
       mimeType: "text/plain",
       buffer: Buffer.from("x"),
     });
+
+    await nav(page, "uploads");
     await expect(page.getByTestId("upload-error")).toContainText("Forbidden");
 
     // No automatic retries for a permanent class.
@@ -100,20 +106,23 @@ test.describe("file management", () => {
     await page.getByTestId("mkdir-submit").click();
     await expect(entryRow(page, created)).toBeVisible();
 
-    await entryRow(page, created).getByTestId("action-rename").click();
+    await entryRow(page, created).getByTestId("entry-actions").click();
+    await page.getByTestId("action-rename").click();
     await page.getByTestId("rename-name").fill(renamed);
     await page.getByTestId("rename-submit").click();
     await expect(entryRow(page, renamed)).toBeVisible();
 
-    await entryRow(page, renamed).getByTestId("action-move").click();
-    await page.getByTestId("move-to").fill(`docs/${renamed}`);
+    await entryRow(page, renamed).getByTestId("entry-actions").click();
+    await page.getByTestId("action-move").click();
+    await page.getByTestId("move-folder").filter({ hasText: "docs" }).click();
     await page.getByTestId("move-submit").click();
     await expect(entryRow(page, renamed)).toHaveCount(0);
 
     await page.getByTestId("open-dir").filter({ hasText: "docs" }).click();
     await expect(entryRow(page, renamed)).toBeVisible();
 
-    await entryRow(page, renamed).getByTestId("action-delete").click();
+    await entryRow(page, renamed).getByTestId("entry-actions").click();
+    await page.getByTestId("action-delete").click();
     await page.getByTestId("delete-confirm").click();
     await expect(entryRow(page, renamed)).toHaveCount(0);
   });
@@ -121,12 +130,10 @@ test.describe("file management", () => {
   test("a viewer is offered no write affordances", async ({ page }) => {
     // Owner grants a viewer share.
     await login(page, OWNER);
-    await page.getByRole("link", { name: "Vdirs", exact: true }).click();
-    await page.getByTestId(/^shares-vdir-/).first().click();
+    await openSharing(page);
     await page.getByLabel("Share with (email)").fill(GRANTEE.email);
     await page.getByTestId("s-grant").click();
     await expect(page.getByTestId("share-row")).toBeVisible();
-    await page.getByLabel("Close dialog").click();
 
     // Grantee browses the shared vdir and sees no write actions.
     await logout(page);
@@ -135,15 +142,17 @@ test.describe("file management", () => {
     await expect(page.getByTestId("entry-0")).toBeVisible();
     await expect(page.getByTestId("new-folder")).toHaveCount(0);
     await expect(page.getByTestId("upload-input")).toHaveCount(0);
+
+    await entryRow(page, "hello.txt").getByTestId("entry-actions").click();
+    await expect(page.getByTestId("context-menu")).toBeVisible();
     await expect(page.getByTestId("action-rename")).toHaveCount(0);
+    await page.getByTestId("context-dismiss").click();
 
     // Clean up the share so other specs see the seeded state.
     await logout(page);
     await login(page, OWNER);
-    await page.getByRole("link", { name: "Vdirs", exact: true }).click();
-    await page.getByTestId(/^shares-vdir-/).first().click();
+    await openSharing(page);
     await page.getByRole("button", { name: "Revoke" }).first().click();
     await expect(page.getByTestId("share-row")).toHaveCount(0);
-    await page.getByLabel("Close dialog").click();
   });
 });

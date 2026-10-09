@@ -1,7 +1,9 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConnectionsPage } from "./ConnectionsPage";
+import { ConnectionFormPage } from "./ConnectionFormPage";
 import { listOf, installPbMock, type SendHandler } from "../test/mockApi";
 
 vi.mock("../lib/session", () => ({
@@ -46,23 +48,30 @@ function recordCollection(initial: Record<string, unknown>[]) {
   return { handler, calls, get records() { return records; } };
 }
 
-beforeEach(() => {
-  localStorage.clear();
-});
+function renderConnections() {
+  return render(
+    <MemoryRouter initialEntries={["/settings/connections"]}>
+      <Routes>
+        <Route path="/settings/connections" element={<ConnectionsPage />} />
+        <Route path="/settings/connections/:id" element={<ConnectionFormPage />} />
+        <Route path="/settings" element={<div>settings destination</div>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
 
-afterEach(() => {
-  vi.restoreAllMocks();
-});
+beforeEach(() => localStorage.clear());
+afterEach(() => vi.restoreAllMocks());
 
 describe("connections management", () => {
   it("creates a password connection with the typed secret", async () => {
     const store = recordCollection([]);
     installPbMock([store.handler]);
-    render(<ConnectionsPage />);
+    renderConnections();
 
     const user = userEvent.setup();
     await user.click(await screen.findByTestId("new-connection"));
-    await user.type(screen.getByLabelText("Label"), "Box");
+    await user.type(await screen.findByLabelText("Label"), "Box");
     await user.type(screen.getByLabelText("Host"), "ssh.example.com");
     await user.type(screen.getByLabelText("Username"), "alice");
     await user.type(screen.getByLabelText(/^Password/), "s3cret");
@@ -70,8 +79,7 @@ describe("connections management", () => {
     await user.click(screen.getByTestId("connection-save"));
 
     await waitFor(() => expect(store.calls.some((c) => c.method === "POST")).toBe(true));
-    const created = store.calls.find((c) => c.method === "POST")!.body;
-    expect(created).toMatchObject({
+    expect(store.calls.find((c) => c.method === "POST")!.body).toMatchObject({
       owner: "u1",
       label: "Box",
       host: "ssh.example.com",
@@ -86,17 +94,16 @@ describe("connections management", () => {
   it("creates a key connection with the private key material", async () => {
     const store = recordCollection([]);
     installPbMock([store.handler]);
-    render(<ConnectionsPage />);
+    renderConnections();
 
     const user = userEvent.setup();
     await user.click(await screen.findByTestId("new-connection"));
-    await user.type(screen.getByLabelText("Label"), "Keybox");
+    await user.type(await screen.findByLabelText("Label"), "Keybox");
     await user.type(screen.getByLabelText("Host"), "h");
     await user.type(screen.getByLabelText("Username"), "u");
-    await user.selectOptions(screen.getByTestId("c-auth"), "key");
-    await user.type(screen.getByLabelText(/^Private key/), "-----BEGIN KEY-----");
-    await user.type(screen.getByLabelText(/Key passphrase/), "pass");
-    await user.type(screen.getByLabelText(/Host key fingerprint/), "SHA256:def");
+    await user.click(screen.getByTestId("c-auth-key"));
+    await user.type(screen.getByLabelText(/^Private Key/), "-----BEGIN KEY-----");
+    await user.type(screen.getByLabelText(/Key Passphrase/), "pass");
     await user.click(screen.getByTestId("connection-save"));
 
     await waitFor(() => expect(store.calls.some((c) => c.method === "POST")).toBe(true));
@@ -117,55 +124,52 @@ describe("connections management", () => {
       username: "u",
       auth_method: "password",
       host_key_fingerprint: "SHA256:x",
-      // Even if a secret somehow appeared in a record, the form must
-      // not surface it; the real server never returns secrets at all.
       password: "SHOULD-NEVER-RENDER",
     };
     const store = recordCollection([existing]);
     installPbMock([store.handler]);
-    render(<ConnectionsPage />);
+    renderConnections();
 
-    const user = userEvent.setup();
-    await user.click(within(await screen.findByTestId("connection-row")).getByText("Edit"));
+    await userEvent.setup().click(await screen.findByTestId("connection-row"));
 
     const passwordInput = await screen.findByLabelText(/^Password/);
     expect((passwordInput as HTMLInputElement).value).toBe("");
     expect(document.body.textContent).not.toContain("SHOULD-NEVER-RENDER");
     expect(passwordInput).toHaveAttribute("placeholder", "••••••••");
 
-    // Save without typing a secret: the PATCH body omits it.
-    await user.click(screen.getByTestId("connection-save"));
+    await userEvent.setup().click(screen.getByTestId("connection-save"));
     await waitFor(() => expect(store.calls.some((c) => c.method === "PATCH")).toBe(true));
     expect(store.calls.find((c) => c.method === "PATCH")!.body).not.toHaveProperty("password");
   });
 
-  it("deletes a connection and drops it from the list", async () => {
+  it("deletes a connection after confirmation and drops it from the list", async () => {
     const store = recordCollection([
       { id: "c1", label: "Box", host: "h", port: 22, username: "u", auth_method: "password", host_key_fingerprint: "f" },
     ]);
     installPbMock([store.handler]);
-    render(<ConnectionsPage />);
+    renderConnections();
 
-    await waitFor(() => expect(screen.getByTestId("connection-row")).toBeInTheDocument());
-    await userEvent.setup().click(screen.getByTestId("delete-connection-c1"));
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("connection-row"));
+    await user.click(await screen.findByTestId("delete-connection"));
+    await user.click(await screen.findByTestId("delete-connection-confirm"));
 
+    await waitFor(() => expect(store.calls.some((c) => c.method === "DELETE")).toBe(true));
     await waitFor(() => expect(screen.queryByTestId("connection-row")).not.toBeInTheDocument());
-    expect(store.calls.some((c) => c.method === "DELETE")).toBe(true);
   });
 
   it("creates a connection without a fingerprint and with a remote directory", async () => {
     const store = recordCollection([]);
     installPbMock([store.handler]);
-    render(<ConnectionsPage />);
+    renderConnections();
 
     const user = userEvent.setup();
     await user.click(await screen.findByTestId("new-connection"));
-    await user.type(screen.getByLabelText("Label"), "Box");
+    await user.type(await screen.findByLabelText("Label"), "Box");
     await user.type(screen.getByLabelText("Host"), "ssh.example.com");
     await user.type(screen.getByLabelText("Username"), "alice");
     await user.type(screen.getByLabelText(/^Password/), "s3cret");
     await user.type(screen.getByLabelText("Remote directory"), "/home/");
-    // Fingerprint intentionally left empty (trust on first use).
     await user.click(screen.getByTestId("connection-save"));
 
     await waitFor(() => expect(store.calls.some((c) => c.method === "POST")).toBe(true));
@@ -174,7 +178,6 @@ describe("connections management", () => {
       host_key_fingerprint: "",
       remote_dir: "/home/",
     });
-    // The list shows the remote directory.
-    await waitFor(() => expect(screen.getByTestId("connection-row")).toHaveTextContent("/home/"));
+    await waitFor(() => expect(within(screen.getByTestId("connection-row")).getByText(/\/home\//)).toBeInTheDocument());
   });
 });

@@ -1,100 +1,109 @@
-// Layout shell (design D5): mobile-first header, off-canvas vdir
-// switcher drawer on small screens, persistent sidebar on md+, and the
-// logout action.
+// Responsive iOS shell (design D3): a translucent bottom tab bar below
+// `md` and a persistent sidebar at `md`+, sharing the same Files /
+// Uploads / Settings destinations and the uploads active count. The
+// floating uploads indicator appears on non-Uploads destinations while
+// uploads are active.
 
-import { useState } from "react";
-import { Link, NavLink, Outlet } from "react-router";
-import { useSession } from "../lib/session";
-import { UploadPanel } from "./UploadPanel";
-import { VdirSwitcher } from "./VdirSwitcher";
+import type { ReactElement } from "react";
+import { NavLink, Outlet, useLocation } from "react-router";
+import { useUploadQueue } from "../lib/useUploadQueue";
+import { FloatingUploadIndicator } from "./FloatingUploadIndicator";
+import { FolderIcon, GearIcon, TrayIcon, type IconProps } from "./icons";
 
-function NavLinks({ onClick }: { onClick?: () => void }) {
-  const cls =
-    "rounded px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100 aria-[current=page]:bg-blue-50 aria-[current=page]:text-blue-700";
+type Destination = { to: string; label: string; Icon: (p: IconProps) => ReactElement };
+
+const DESTINATIONS: Destination[] = [
+  { to: "/files", label: "Files", Icon: FolderIcon },
+  { to: "/uploads", label: "Uploads", Icon: TrayIcon },
+  { to: "/settings", label: "Settings", Icon: GearIcon },
+];
+
+export function activeUploadCount(items: Array<{ state: string }>): number {
+  return items.filter((it) => it.state === "queued" || it.state === "running" || it.state === "paused")
+    .length;
+}
+
+function UploadsBadge({ count }: { count: number }) {
+  if (count <= 0) return null;
   return (
-    <>
-      <NavLink to="/connections" className={cls} onClick={onClick}>
-        Connections
-      </NavLink>
-      <NavLink to="/vdirs" className={cls} onClick={onClick}>
-        Vdirs
-      </NavLink>
-    </>
+    <span
+      data-testid="uploads-badge"
+      aria-label={`${count} active uploads`}
+      className="absolute -top-1 -right-2 flex h-4 w-4 items-center justify-center rounded-full bg-ios-blue text-[10px] font-bold text-white"
+    >
+      {count}
+    </span>
+  );
+}
+
+function TabBar({ activeUploads }: { activeUploads: number }) {
+  return (
+    <nav
+      data-testid="tab-bar"
+      aria-label="Primary"
+      className="fixed inset-x-0 bottom-0 z-30 flex items-start justify-around border-t border-ios-separator bg-ios-card/80 px-3 pt-2 pb-safe backdrop-blur-xl md:hidden"
+    >
+      {DESTINATIONS.map(({ to, label, Icon }) => (
+        <NavLink
+          key={to}
+          to={to}
+          data-testid={`tab-${label.toLowerCase()}`}
+          className="flex w-20 flex-col items-center text-ios-secondary/60 aria-[current=page]:text-ios-blue"
+        >
+          <span className="relative">
+            <Icon className="text-xl" />
+            {to === "/uploads" && <UploadsBadge count={activeUploads} />}
+          </span>
+          <span className="text-[10px] font-semibold">{label}</span>
+        </NavLink>
+      ))}
+    </nav>
+  );
+}
+
+function Sidebar({ activeUploads }: { activeUploads: number }) {
+  return (
+    <aside
+      data-testid="sidebar"
+      aria-label="Primary"
+      className="hidden w-64 shrink-0 border-r border-ios-separator bg-ios-card md:flex md:flex-col"
+    >
+      <div className="flex h-14 items-center px-5 text-lg font-semibold text-ios-label">Stratofold</div>
+      <nav className="flex flex-col gap-1 p-3">
+        {DESTINATIONS.map(({ to, label, Icon }) => (
+          <NavLink
+            key={to}
+            to={to}
+            data-testid={`side-${label.toLowerCase()}`}
+            className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-base font-medium text-ios-label hover:bg-ios-bg aria-[current=page]:bg-ios-blue/10 aria-[current=page]:text-ios-blue"
+          >
+            <span className="relative">
+              <Icon className="text-xl" />
+              {to === "/uploads" && <UploadsBadge count={activeUploads} />}
+            </span>
+            {label}
+          </NavLink>
+        ))}
+      </nav>
+    </aside>
   );
 }
 
 export function AppShell() {
-  const { userEmail, logout } = useSession();
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const { pathname } = useLocation();
+  const { items } = useUploadQueue();
+  const activeUploads = activeUploadCount(items);
 
   return (
-    <div className="flex min-h-dvh flex-col bg-white text-gray-900">
-      <header className="flex h-14 items-center gap-2 border-b border-gray-200 px-3">
-        <button
-          type="button"
-          aria-label="Open navigation"
-          data-testid="nav-toggle"
-          onClick={() => setDrawerOpen(true)}
-          className="rounded p-2 text-gray-600 hover:bg-gray-100 md:hidden"
-        >
-          ☰
-        </button>
-        <Link to="/" className="text-lg font-semibold text-blue-700">
-          Stratofold
-        </Link>
-        <nav aria-label="Primary" className="ml-auto flex items-center gap-1">
-          <span className="hidden sm:inline text-sm text-gray-500">{userEmail}</span>
-          <NavLinks />
-          <button
-            type="button"
-            data-testid="logout"
-            onClick={() => void logout()}
-            className="rounded px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
-          >
-            Log out
-          </button>
-        </nav>
-      </header>
-
-      <div className="flex flex-1">
-        <aside className="hidden w-64 shrink-0 border-r border-gray-200 md:block" aria-label="Virtual directories">
-          <VdirSwitcher />
-        </aside>
-
-        {drawerOpen && (
-          <div className="fixed inset-0 z-40 md:hidden" data-testid="drawer">
-            <div
-              className="absolute inset-0 bg-black/40"
-              aria-hidden="true"
-              onClick={() => setDrawerOpen(false)}
-            />
-            <aside
-              aria-label="Virtual directories"
-              className="absolute inset-y-0 left-0 w-72 overflow-auto bg-white shadow-xl"
-            >
-              <div className="flex h-14 items-center justify-between border-b border-gray-200 px-3">
-                <span className="font-semibold text-blue-700">Stratofold</span>
-                <button
-                  type="button"
-                  aria-label="Close navigation"
-                  onClick={() => setDrawerOpen(false)}
-                  className="rounded p-1 text-gray-500 hover:bg-gray-100"
-                >
-                  ✕
-                </button>
-              </div>
-              <NavLinks onClick={() => setDrawerOpen(false)} />
-              <VdirSwitcher onNavigate={() => setDrawerOpen(false)} />
-            </aside>
-          </div>
-        )}
-
-        <main className="min-w-0 flex-1">
+    <div className="flex h-dvh overflow-hidden bg-ios-bg text-ios-label">
+      <Sidebar activeUploads={activeUploads} />
+      <main className="flex min-w-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1 overflow-y-auto pb-24 md:pb-0">
           <Outlet />
-        </main>
-      </div>
-
-      <UploadPanel />
+        </div>
+      </main>
+      <TabBar activeUploads={activeUploads} />
+      {pathname !== "/uploads" && <FloatingUploadIndicator count={activeUploads} />}
     </div>
   );
 }

@@ -3,29 +3,8 @@
 // "Home" vdir and a public "Public" vdir over a dataset with hello.txt,
 // a media file, docs/, and a 10k-entry big/ directory.
 
-import { expect, test, type Page } from "@playwright/test";
-
-const OWNER = { email: "owner@stratofold.test", password: "owner-pass-123" };
-const GRANTEE = { email: "grantee@stratofold.test", password: "grantee-pass-123" };
-
-async function login(page: Page, user: { email: string; password: string }) {
-  await page.goto("/");
-  await page.getByLabel("Email").fill(user.email);
-  await page.getByLabel("Password").fill(user.password);
-  await page.getByTestId("login-submit").click();
-  await expect(page.getByRole("link", { name: "Connections" })).toBeVisible();
-}
-
-async function openHome(page: Page) {
-  // The switcher lists "Home" under My vdirs; clicking opens the root.
-  await page.getByTestId("vdir-switcher").getByRole("button", { name: /Home/ }).click();
-  await expect(page.getByTestId("breadcrumbs")).toContainText("Home");
-}
-
-async function logout(page: Page) {
-  await page.getByTestId("logout").click();
-  await expect(page.getByLabel("Email")).toBeVisible();
-}
+import { expect, test } from "@playwright/test";
+import { GRANTEE, OWNER, entryRow, login, logout, nav, openHome, openSharing } from "./helpers";
 
 test.describe("browsing", () => {
   test("login → browse → download", async ({ page }) => {
@@ -35,9 +14,11 @@ test.describe("browsing", () => {
     await expect(page.getByTestId("entry-0")).toBeVisible();
     await expect(page.getByText("hello.txt")).toBeVisible();
 
+    // Download lives in the entry's context menu.
+    await entryRow(page, "hello.txt").getByTestId("entry-actions").click();
     const [download] = await Promise.all([
       page.waitForEvent("download"),
-      page.getByTestId("download-link").first().click(),
+      page.getByTestId("action-download").click(),
     ]);
     expect(download.suggestedFilename()).toBe("hello.txt");
     const path = await download.path();
@@ -105,7 +86,6 @@ test.describe("browsing", () => {
     expect(popup.url()).toContain("movie.mp4");
 
     const movieUrl = popup.url();
-    // Range request at offset 0.
     const first = await popup.evaluate(async (url) => {
       const resp = await fetch(url, { headers: { Range: "bytes=0-9" } });
       return { status: resp.status, len: (await resp.arrayBuffer()).byteLength };
@@ -113,7 +93,6 @@ test.describe("browsing", () => {
     expect(first.status).toBe(206);
     expect(first.len).toBe(10);
 
-    // A seek-equivalent Range request at a later offset.
     const seek = await popup.evaluate(async (url) => {
       const resp = await fetch(url, { headers: { Range: "bytes=10-19" } });
       return { status: resp.status, len: (await resp.arrayBuffer()).byteLength };
@@ -121,19 +100,16 @@ test.describe("browsing", () => {
     expect(seek.status).toBe(206);
     expect(seek.len).toBe(10);
 
-    // The browser's own media load issued at least one Range request.
     expect(ranges.length).toBeGreaterThan(0);
   });
 
   test("share grant, grantee access, and immediate revocation", async ({ page }) => {
     // Owner grants viewer to the grantee.
     await login(page, OWNER);
-    await page.getByRole("link", { name: "Vdirs", exact: true }).click();
-    await page.getByTestId(/^shares-vdir-/).first().click();
+    await openSharing(page);
     await page.getByLabel("Share with (email)").fill(GRANTEE.email);
     await page.getByTestId("s-grant").click();
     await expect(page.getByTestId("share-row")).toBeVisible();
-    await page.getByLabel("Close dialog").click();
 
     // Grantee sees the shared vdir and can browse it.
     await logout(page);
@@ -146,11 +122,9 @@ test.describe("browsing", () => {
     // Owner revokes; the grantee loses access on the next request.
     await logout(page);
     await login(page, OWNER);
-    await page.getByRole("link", { name: "Vdirs", exact: true }).click();
-    await page.getByTestId(/^shares-vdir-/).first().click();
+    await openSharing(page);
     await page.getByRole("button", { name: "Revoke" }).first().click();
     await expect(page.getByTestId("share-row")).toHaveCount(0);
-    await page.getByLabel("Close dialog").click();
 
     await logout(page);
     await login(page, GRANTEE);
@@ -162,7 +136,7 @@ test.describe("browsing", () => {
     await logout(page);
     await page.goto("/");
     await expect(page.getByLabel("Email")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Connections" })).toHaveCount(0);
+    await expect(page.getByTestId("locations")).toHaveCount(0);
   });
 });
 
@@ -171,10 +145,11 @@ test.describe("responsive and keyboard", () => {
     await page.setViewportSize({ width: 375, height: 700 });
     await login(page, OWNER);
 
-    await page.getByTestId("nav-toggle").click();
-    await page.getByTestId("drawer").getByRole("button", { name: /Home/ }).click();
+    await expect(page.getByTestId("tab-bar")).toBeVisible();
+    await page.getByTestId("group-my-vdirs").getByRole("button", { name: /Home/ }).click();
     await expect(page.getByTestId("entry-0")).toBeVisible();
-    await expect(page.getByTestId("nav-toggle")).toBeVisible();
+    await nav(page, "files");
+    await expect(page.getByTestId("locations")).toBeVisible();
   });
 
   test("keyboard opens a directory", async ({ page }) => {

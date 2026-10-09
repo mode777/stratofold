@@ -1,8 +1,10 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VdirsPage } from "./VdirsPage";
+import { VdirFormPage } from "./VdirFormPage";
+import { SharingPage } from "./SharingPage";
 import { listOf, installPbMock, type SendHandler } from "../test/mockApi";
 
 vi.mock("../lib/session", () => ({
@@ -55,10 +57,19 @@ const CONNECTIONS = [
   { id: "c2", label: "Box B", host: "b", port: 22, username: "u", auth_method: "password", host_key_fingerprint: "f" },
 ];
 
+function connectionsHandler(): SendHandler {
+  return (path) => (path.includes("/collections/connections/records") ? listOf(CONNECTIONS) : undefined);
+}
+
 function renderPage() {
   return render(
-    <MemoryRouter>
-      <VdirsPage />
+    <MemoryRouter initialEntries={["/settings/vdirs"]}>
+      <Routes>
+        <Route path="/settings/vdirs" element={<VdirsPage />} />
+        <Route path="/settings/vdirs/:id" element={<VdirFormPage />} />
+        <Route path="/settings/vdirs/:id/sharing" element={<SharingPage />} />
+        <Route path="/settings" element={<div>settings destination</div>} />
+      </Routes>
     </MemoryRouter>,
   );
 }
@@ -71,7 +82,7 @@ describe("vdirs management", () => {
     const own = { id: "v1", owner: "u1", name: "Mine", root_path: "/srv", is_public: false, connection: "c1" };
     const foreign = { id: "v2", owner: "u2", name: "NotMine", root_path: "/x", is_public: false, connection: "c2" };
     const store = vdirStore([own, foreign]);
-    installPbMock([store.handler, (path) => (path.includes("/collections/connections/records") ? listOf(CONNECTIONS) : undefined)]);
+    installPbMock([store.handler, connectionsHandler(), (path) => (path.includes("/collections/vdir_shares/records") ? listOf([]) : undefined)]);
 
     renderPage();
     await waitFor(() => expect(screen.getByTestId("vdir-row")).toBeInTheDocument());
@@ -79,8 +90,8 @@ describe("vdirs management", () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByTestId("new-vdir"));
-    await user.type(screen.getByLabelText("Name"), "NewVdir");
-    await user.type(screen.getByLabelText("Root path"), "/data");
+    await user.type(await screen.findByLabelText("Name"), "NewVdir");
+    await user.type(screen.getByLabelText("Root Path"), "/data");
     await user.selectOptions(screen.getByTestId("v-connection"), "c2");
     await user.click(screen.getByTestId("vdir-save"));
 
@@ -96,20 +107,16 @@ describe("vdirs management", () => {
 
   it("prefills the root path from the selected connection's remote directory", async () => {
     const store = vdirStore([]);
-    installPbMock([store.handler, (path) => (path.includes("/collections/connections/records") ? listOf(CONNECTIONS) : undefined)]);
+    installPbMock([store.handler, connectionsHandler(), (path) => (path.includes("/collections/vdir_shares/records") ? listOf([]) : undefined)]);
     renderPage();
 
     const user = userEvent.setup();
     await user.click(screen.getByTestId("new-vdir"));
-    await user.type(screen.getByLabelText("Name"), "Prefilled");
-
-    // Selecting a connection with a remote directory seeds root_path.
+    await user.type(await screen.findByLabelText("Name"), "Prefilled");
     await user.selectOptions(screen.getByTestId("v-connection"), "c1");
-    const root = screen.getByLabelText("Root path") as HTMLInputElement;
+    const root = screen.getByLabelText("Root Path") as HTMLInputElement;
     expect(root.value).toBe("/home/");
 
-    // A manual edit wins; switching to a connection without a remote
-    // directory leaves the typed value alone.
     await user.clear(root);
     await user.type(root, "/custom");
     await user.selectOptions(screen.getByTestId("v-connection"), "c2");
@@ -127,17 +134,16 @@ describe("vdirs management", () => {
   it("offers only the user's own connections for binding", async () => {
     installPbMock([
       (path) => (path.includes("/collections/vdirs/records") ? listOf([]) : undefined),
-      (path) => (path.includes("/collections/connections/records") ? listOf(CONNECTIONS) : undefined),
+      connectionsHandler(),
+      (path) => (path.includes("/collections/vdir_shares/records") ? listOf([]) : undefined),
     ]);
     renderPage();
 
-    const user = userEvent.setup();
-    await user.click(screen.getByTestId("new-vdir"));
+    await userEvent.setup().click(screen.getByTestId("new-vdir"));
     const select = await screen.findByTestId("v-connection");
     const options = within(select)
       .getAllByRole("option")
       .map((o) => o.textContent);
-    // The disabled placeholder plus exactly the user's own connections.
     expect(options[0]).toBe("Choose a connection");
     expect(options.slice(1)).toEqual(["Box A", "Box B"]);
   });
@@ -145,29 +151,31 @@ describe("vdirs management", () => {
   it("toggles is_public and shows the public marking after save", async () => {
     const own = { id: "v1", owner: "u1", name: "Mine", root_path: "/srv", is_public: false, connection: "c1" };
     const store = vdirStore([own]);
-    installPbMock([store.handler, (path) => (path.includes("/collections/connections/records") ? listOf(CONNECTIONS) : undefined)]);
+    installPbMock([store.handler, connectionsHandler(), (path) => (path.includes("/collections/vdir_shares/records") ? listOf([]) : undefined)]);
 
     renderPage();
     const user = userEvent.setup();
-    await user.click(within(await screen.findByTestId("vdir-row")).getByText("Edit"));
-    await user.click(screen.getByTestId("v-public"));
+    await user.click(await screen.findByTestId("vdir-row"));
+    await user.click(await screen.findByTestId("v-public"));
     await user.click(screen.getByTestId("vdir-save"));
 
     await waitFor(() => expect(store.calls.some((c) => c.method === "PATCH")).toBe(true));
     expect(store.calls.find((c) => c.method === "PATCH")!.body).toMatchObject({ is_public: true });
-    await waitFor(() => expect(screen.getByTestId("vdir-row")).toHaveTextContent("public"));
+    await waitFor(() => expect(screen.getByTestId("vdir-row")).toHaveTextContent("Public"));
   });
 
-  it("deletes a vdir and drops it from the list", async () => {
+  it("deletes a vdir after confirmation and drops it from the list", async () => {
     const own = { id: "v1", owner: "u1", name: "Mine", root_path: "/srv", is_public: false, connection: "c1" };
     const store = vdirStore([own]);
-    installPbMock([store.handler, (path) => (path.includes("/collections/connections/records") ? listOf(CONNECTIONS) : undefined)]);
+    installPbMock([store.handler, connectionsHandler(), (path) => (path.includes("/collections/vdir_shares/records") ? listOf([]) : undefined)]);
 
     renderPage();
-    await waitFor(() => expect(screen.getByTestId("vdir-row")).toBeInTheDocument());
-    await userEvent.setup().click(screen.getByTestId("delete-vdir-v1"));
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("vdir-row"));
+    await user.click(await screen.findByTestId("delete-vdir"));
+    await user.click(await screen.findByTestId("delete-vdir-confirm"));
 
+    await waitFor(() => expect(store.calls.some((c) => c.method === "DELETE")).toBe(true));
     await waitFor(() => expect(screen.queryByTestId("vdir-row")).not.toBeInTheDocument());
-    expect(store.calls.some((c) => c.method === "DELETE")).toBe(true);
   });
 });

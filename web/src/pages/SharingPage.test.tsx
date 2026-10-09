@@ -1,7 +1,8 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ShareDialog } from "../components/ShareDialog";
+import { SharingPage } from "./SharingPage";
 import { installFetchMock, installPbMock, jsonResponse, listOf, type SendHandler } from "../test/mockApi";
 
 vi.mock("../lib/session", () => ({
@@ -51,7 +52,7 @@ function shareStore(initial: Record<string, unknown>[], createError?: Response) 
         return undefined;
     }
   };
-  return { handler, calls, get records() { return records; } };
+  return { handler, calls };
 }
 
 function lookupRoute(email: string, found: boolean) {
@@ -65,19 +66,34 @@ function lookupRoute(email: string, found: boolean) {
   };
 }
 
+function renderSharing() {
+  return render(
+    <MemoryRouter initialEntries={["/settings/vdirs/v1/sharing"]}>
+      <Routes>
+        <Route path="/settings/vdirs/:id/sharing" element={<SharingPage />} />
+        <Route path="/settings/vdirs/:id" element={<div>vdir form</div>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+function vdirHandler(): SendHandler {
+  return (path) => (path.includes("/collections/vdirs/records") ? listOf([VDIR]) : undefined);
+}
+
 beforeEach(() => localStorage.clear());
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
-describe("share dialog", () => {
+describe("sharing page", () => {
   it("grants a viewer share by resolving the email to a user id", async () => {
     const store = shareStore([]);
-    installPbMock([store.handler]);
+    installPbMock([vdirHandler(), store.handler]);
     installFetchMock([lookupRoute("grantee@stratofold.test", true)]);
 
-    render(<ShareDialog vdir={VDIR} onClose={vi.fn()} onChanged={vi.fn()} />);
+    renderSharing();
     const user = userEvent.setup();
     await user.type(await screen.findByLabelText("Share with (email)"), "grantee@stratofold.test");
     await user.click(screen.getByTestId("s-grant"));
@@ -91,12 +107,27 @@ describe("share dialog", () => {
     await waitFor(() => expect(screen.getByTestId("share-row")).toBeInTheDocument());
   });
 
+  it("grants an editor share when the editor role is selected", async () => {
+    const store = shareStore([]);
+    installPbMock([vdirHandler(), store.handler]);
+    installFetchMock([lookupRoute("grantee@stratofold.test", true)]);
+
+    renderSharing();
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Share with (email)"), "grantee@stratofold.test");
+    await user.click(screen.getByTestId("s-role-editor"));
+    await user.click(screen.getByTestId("s-grant"));
+
+    await waitFor(() => expect(store.calls.some((c) => c.method === "POST")).toBe(true));
+    expect(store.calls.find((c) => c.method === "POST")!.body).toMatchObject({ role: "editor" });
+  });
+
   it("changes a share's role", async () => {
     const store = shareStore([{ id: "s1", vdir: "v1", user: "u2", role: "viewer" }]);
-    installPbMock([store.handler]);
+    installPbMock([vdirHandler(), store.handler]);
     installFetchMock([]);
 
-    render(<ShareDialog vdir={VDIR} onClose={vi.fn()} onChanged={vi.fn()} />);
+    renderSharing();
     const row = await screen.findByTestId("share-row");
     await userEvent.setup().selectOptions(within(row).getByTestId("share-role-s1"), "editor");
 
@@ -106,10 +137,10 @@ describe("share dialog", () => {
 
   it("revokes a share", async () => {
     const store = shareStore([{ id: "s1", vdir: "v1", user: "u2", role: "viewer" }]);
-    installPbMock([store.handler]);
+    installPbMock([vdirHandler(), store.handler]);
     installFetchMock([]);
 
-    render(<ShareDialog vdir={VDIR} onClose={vi.fn()} onChanged={vi.fn()} />);
+    renderSharing();
     await userEvent.setup().click(await screen.findByTestId("share-revoke-s1"));
 
     await waitFor(() => expect(screen.queryByTestId("share-row")).not.toBeInTheDocument());
@@ -119,9 +150,9 @@ describe("share dialog", () => {
   it("rejects a self-share before submission", async () => {
     const store = shareStore([]);
     const lookup = installFetchMock([lookupRoute("owner@stratofold.test", true)]);
-    installPbMock([store.handler]);
+    installPbMock([vdirHandler(), store.handler]);
 
-    render(<ShareDialog vdir={VDIR} onClose={vi.fn()} onChanged={vi.fn()} />);
+    renderSharing();
     const user = userEvent.setup();
     await user.type(await screen.findByLabelText("Share with (email)"), "owner@stratofold.test");
     await user.click(screen.getByTestId("s-grant"));
@@ -133,10 +164,10 @@ describe("share dialog", () => {
 
   it("surfaces the server's duplicate rejection", async () => {
     const store = shareStore([], jsonResponse(400, { message: "Value must be unique." }));
-    installPbMock([store.handler]);
+    installPbMock([vdirHandler(), store.handler]);
     installFetchMock([lookupRoute("grantee@stratofold.test", true)]);
 
-    render(<ShareDialog vdir={VDIR} onClose={vi.fn()} onChanged={vi.fn()} />);
+    renderSharing();
     const user = userEvent.setup();
     await user.type(await screen.findByLabelText("Share with (email)"), "grantee@stratofold.test");
     await user.click(screen.getByTestId("s-grant"));
@@ -147,10 +178,10 @@ describe("share dialog", () => {
 
   it("reports an unknown email as an error without creating a share", async () => {
     const store = shareStore([]);
-    installPbMock([store.handler]);
+    installPbMock([vdirHandler(), store.handler]);
     installFetchMock([lookupRoute("nobody@stratofold.test", false)]);
 
-    render(<ShareDialog vdir={VDIR} onClose={vi.fn()} onChanged={vi.fn()} />);
+    renderSharing();
     const user = userEvent.setup();
     await user.type(await screen.findByLabelText("Share with (email)"), "nobody@stratofold.test");
     await user.click(screen.getByTestId("s-grant"));

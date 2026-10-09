@@ -51,15 +51,14 @@ const MINE = { id: "v1", owner: "u1", name: "Mine", root_path: "/srv/mine", is_p
 const SHARED = { id: "v2", owner: "u2", name: "Shared", root_path: "/srv/shared", is_public: true, connection: "c2" };
 
 describe("app shell and routing", () => {
-  it("redirects / to the first vdir and browses it", async () => {
+  it("redirects / to the Files tab", async () => {
     installPbMock([authRefresh(OWNER), collectionList("vdirs", [MINE, SHARED])]);
-    installFetchMock([lsRoute("v1", "", [{ name: "docs", size: 0, dir: true, modtime: "2026-01-01T00:00:00Z" }])]);
+    installFetchMock([]);
 
     renderApp("/");
 
-    await waitFor(() => expect(screen.getByTestId("breadcrumbs")).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByTestId("breadcrumbs")).toHaveTextContent("Mine"));
-    await waitFor(() => expect(screen.getByTestId("entry-0")).toHaveTextContent("docs"));
+    await waitFor(() => expect(screen.getByTestId("locations")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("group-my-vdirs")).toHaveTextContent("Mine"));
   });
 
   it("renders the browse route for a vdir with its entries", async () => {
@@ -74,7 +73,7 @@ describe("app shell and routing", () => {
     await waitFor(() => expect(screen.getByTestId("entry-0")).toHaveTextContent("a.txt"));
   });
 
-  it("renders the connections and vdirs management routes", async () => {
+  it("renders the settings management routes", async () => {
     installPbMock([
       authRefresh(OWNER),
       collectionList("vdirs", [MINE]),
@@ -82,14 +81,15 @@ describe("app shell and routing", () => {
     ]);
     installFetchMock([]);
 
-    renderApp("/connections");
+    const connections = renderApp("/settings/connections");
     await waitFor(() => expect(screen.getByTestId("connections-page")).toBeInTheDocument());
+    connections.unmount();
 
-    renderApp("/vdirs");
+    renderApp("/settings/vdirs");
     await waitFor(() => expect(screen.getByTestId("vdirs-page")).toBeInTheDocument());
   });
 
-  it("renders a catch-all not-found page", async () => {
+  it("renders a catch-all page-not-found", async () => {
     installPbMock([authRefresh(OWNER), collectionList("vdirs", [])]);
     installFetchMock([]);
 
@@ -97,7 +97,7 @@ describe("app shell and routing", () => {
     await waitFor(() => expect(screen.getByText("Page not found")).toBeInTheDocument());
   });
 
-  it("mounts the upload panel across authenticated routes", async () => {
+  it("mounts the shell tab bar across authenticated routes", async () => {
     installPbMock([
       authRefresh(OWNER),
       collectionList("vdirs", [MINE]),
@@ -106,28 +106,29 @@ describe("app shell and routing", () => {
     installFetchMock([lsRoute("v1", "", [])]);
 
     const browse = renderApp("/v/v1");
-    await waitFor(() => expect(screen.getByTestId("upload-panel")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("tab-bar")).toBeInTheDocument());
     browse.unmount();
 
-    renderApp("/connections");
+    renderApp("/settings/connections");
     await waitFor(() => expect(screen.getByTestId("connections-page")).toBeInTheDocument());
-    expect(screen.getByTestId("upload-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("tab-bar")).toBeInTheDocument();
   });
 });
 
-describe("vdir switcher grouping", () => {
+describe("locations grouping", () => {
   it("separates my vdirs from shared with me and marks public", async () => {
     installPbMock([authRefresh(OWNER), collectionList("vdirs", [MINE, SHARED])]);
-    installFetchMock([lsRoute("v1", "", [])]);
+    installFetchMock([]);
 
-    renderApp("/v/v1");
+    renderApp("/files");
 
-    const switcher = await screen.findByTestId("vdir-switcher");
-    const mine = within(switcher).getByTestId("group-my-vdirs");
+    const locations = await screen.findByTestId("locations");
+    await waitFor(() => expect(within(locations).getByTestId("group-my-vdirs")).toBeInTheDocument());
+    const mine = within(locations).getByTestId("group-my-vdirs");
     expect(within(mine).getByText("Mine")).toBeInTheDocument();
     expect(within(mine).queryByText("Shared")).not.toBeInTheDocument();
 
-    const shared = within(switcher).getByTestId("group-shared-with-me");
+    const shared = within(locations).getByTestId("group-shared-with-me");
     expect(within(shared).getByText("Shared")).toBeInTheDocument();
     expect(within(shared).getByTestId("public-badge")).toBeInTheDocument();
   });
@@ -136,12 +137,11 @@ describe("vdir switcher grouping", () => {
     installPbMock([authRefresh(OWNER), collectionList("vdirs", [SHARED]), collectionList("connections", [])]);
     installFetchMock([]);
 
-    renderApp("/connections");
+    renderApp("/settings/connections");
 
     await waitFor(() => expect(screen.getByText(/No connections yet/)).toBeInTheDocument());
     expect(screen.queryByTestId("connection-row")).not.toBeInTheDocument();
-    // The switcher itself never mentions connections.
-    const switcher = screen.getByTestId("vdir-switcher");
-    expect(switcher).not.toHaveTextContent(/connection/i);
+    // The Files list never mentions connections.
+    expect(screen.getByTestId("connections-page")).not.toHaveTextContent(/connection record/i);
   });
 });

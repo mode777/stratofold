@@ -1,291 +1,79 @@
-// Vdirs management (web-ui spec): create/edit/delete over the record
-// API — own connections only in the binding select, is_public toggle,
-// and per-vdir share management for the owner.
+// Virtual directories list (web-ui spec): the owner's own vdirs with
+// public pills and remote paths; the "+" pushes the form.
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useNavigate } from "react-router";
 import { useSession } from "../lib/session";
-import {
-  createVdir,
-  deleteVdir,
-  listConnections,
-  toApiFailure,
-  updateVdir,
-  type ConnectionRecord,
-  type VdirRecord,
-} from "../lib/records";
 import { useVdirs } from "../lib/useVdirs";
-import { Dialog } from "../components/Dialog";
 import { FailureState, Spinner } from "../components/Errors";
-import { ShareDialog } from "../components/ShareDialog";
+import { ChevronLeftIcon, ChevronRightIcon, FolderIcon, PlusIcon } from "../components/icons";
 
 export function VdirsPage() {
   const { userId } = useSession();
   const { vdirs, failure, loading, reload } = useVdirs();
-  const [connections, setConnections] = useState<ConnectionRecord[] | null>(null);
-  const [editing, setEditing] = useState<VdirRecord | "new" | null>(null);
-  const [sharing, setSharing] = useState<VdirRecord | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void listConnections()
-      .then((records) => {
-        if (!cancelled) setConnections(records);
-      })
-      .catch(() => {
-        // The select surfaces "no connections" from an empty list.
-        if (!cancelled) setConnections([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [editing]);
-
-  const remove = async (id: string) => {
-    setActionError(null);
-    try {
-      await deleteVdir(id);
-      reload();
-    } catch (err) {
-      setActionError(toApiFailure(err).message);
-    }
-  };
-
+  const navigate = useNavigate();
   const own = vdirs.filter((v) => v.owner === userId);
 
   return (
-    <div className="p-3" data-testid="vdirs-page">
-      <div className="mb-3 flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Vdirs</h1>
-        <button
-          type="button"
-          data-testid="new-vdir"
-          onClick={() => setEditing("new")}
-          className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
-        >
-          New vdir
-        </button>
+    <div data-testid="vdirs-page" className="flex min-h-dvh flex-col">
+      <div className="px-4 pt-1 pb-1">
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => void navigate("/settings")}
+            className="flex items-center text-base text-ios-blue"
+          >
+            <ChevronLeftIcon className="mr-0.5 text-sm" /> Settings
+          </button>
+          <button
+            type="button"
+            data-testid="new-vdir"
+            aria-label="New vdir"
+            onClick={() => void navigate("/settings/vdirs/new")}
+            className="text-ios-blue"
+          >
+            <PlusIcon className="text-lg" />
+          </button>
+        </div>
+        <h1 className="mt-0.5 text-[34px] font-bold leading-tight tracking-tight text-ios-label">
+          Virtual Dirs
+        </h1>
       </div>
-
-      {actionError && (
-        <p role="alert" className="mb-2 text-sm text-red-600">
-          {actionError}
-        </p>
-      )}
 
       {loading ? (
         <Spinner />
       ) : failure ? (
         <FailureState failure={failure} onRetry={reload} />
       ) : own.length === 0 ? (
-        <p className="text-sm text-gray-500">
+        <p className="px-4 py-3 text-sm text-ios-secondary/50">
           No vdirs yet — create one on one of your connections.
         </p>
       ) : (
-        <ul className="divide-y divide-gray-100 rounded border border-gray-200">
+        <div className="mx-4 mt-2 divide-y divide-ios-separator overflow-hidden rounded-2xl border border-black/5 bg-ios-card shadow-sm">
           {own.map((v) => (
-            <li key={v.id} className="flex items-center gap-3 px-3 py-2" data-testid="vdir-row">
+            <button
+              key={v.id}
+              type="button"
+              data-testid="vdir-row"
+              onClick={() => void navigate(`/settings/vdirs/${v.id}`)}
+              className="flex w-full items-center gap-3 px-4 py-3.5 text-left active:bg-ios-bg"
+            >
+              <FolderIcon className="text-lg text-ios-blue" />
               <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium">
-                  {v.name}
+                <span className="flex items-center gap-2">
+                  <span className="truncate text-base font-semibold text-ios-label">{v.name}</span>
                   {v.is_public && (
-                    <span className="ml-2 rounded-full bg-green-50 px-2 py-0.5 text-xs text-green-700">
-                      public
+                    <span className="rounded-full bg-ios-green/15 px-1.5 py-0.5 text-[10px] font-bold text-ios-green">
+                      Public
                     </span>
                   )}
                 </span>
-                <span className="block truncate text-sm text-gray-500">{v.root_path}</span>
+                <span className="block truncate font-mono text-xs text-ios-secondary/60">{v.root_path}</span>
               </span>
-              <button
-                type="button"
-                data-testid={`shares-vdir-${v.id}`}
-                onClick={() => setSharing(v)}
-                className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50"
-              >
-                Shares
-              </button>
-              <button
-                type="button"
-                onClick={() => setEditing(v)}
-                className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50"
-              >
-                Edit
-              </button>
-              <button
-                type="button"
-                data-testid={`delete-vdir-${v.id}`}
-                onClick={() => void remove(v.id)}
-                className="rounded border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
-              >
-                Delete
-              </button>
-            </li>
+              <ChevronRightIcon className="shrink-0 text-xs text-ios-secondary/30" />
+            </button>
           ))}
-        </ul>
-      )}
-
-      {editing && (
-        <VdirForm
-          existing={editing === "new" ? null : editing}
-          connections={connections ?? []}
-          connectionsLoading={connections === null}
-          ownerId={userId}
-          onClose={() => setEditing(null)}
-          onSaved={() => {
-            setEditing(null);
-            reload();
-          }}
-        />
-      )}
-
-      {sharing && (
-        <ShareDialog
-          vdir={sharing}
-          onClose={() => setSharing(null)}
-          onChanged={reload}
-        />
+        </div>
       )}
     </div>
   );
 }
-
-const inputCls = "mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-600 focus:outline-none";
-
-function VdirForm({
-  existing,
-  connections,
-  connectionsLoading,
-  ownerId,
-  onClose,
-  onSaved,
-}: {
-  existing: VdirRecord | null;
-  connections: ConnectionRecord[];
-  connectionsLoading: boolean;
-  ownerId: string;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [isPublic, setIsPublic] = useState(existing?.is_public ?? false);
-  const [rootPath, setRootPath] = useState(existing?.root_path ?? "");
-  const [connectionId, setConnectionId] = useState(existing?.connection ?? "");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  // Creating a vdir: picking a connection offers its remote directory as
-  // the default root path (design D5). A non-empty default wins; an
-  // empty one leaves whatever the user typed. Editing never overwrites.
-  const onConnectionChange = (id: string) => {
-    setConnectionId(id);
-    if (existing) return;
-    const remoteDir = connections.find((c) => c.id === id)?.remote_dir;
-    if (remoteDir) setRootPath(remoteDir);
-  };
-
-  // Only the user's own connections are selectable — the API rule
-  // rejects foreign bindings anyway; the UI never offers them.
-  const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    const form = new FormData(e.currentTarget);
-    const data: Record<string, unknown> = {
-      name: String(form.get("name") ?? "").trim(),
-      root_path: rootPath.trim(),
-      connection: connectionId,
-      is_public: isPublic,
-    };
-    // The vdirs create rule requires the owner to match the signed-in
-    // user; set on create only.
-    if (!existing) data.owner = ownerId;
-    try {
-      if (existing) {
-        await updateVdir(existing.id, data);
-      } else {
-        await createVdir(data);
-      }
-      onSaved();
-    } catch (err) {
-      setError(toApiFailure(err).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Dialog title={existing ? "Edit vdir" : "New vdir"} onClose={onClose}>
-      <form onSubmit={onSubmit} data-testid="vdir-form">
-        <label htmlFor="v-name" className="block text-sm font-medium text-gray-700">
-          Name
-        </label>
-        <input id="v-name" name="name" required defaultValue={existing?.name ?? ""} className={inputCls} />
-
-        <label htmlFor="v-root" className="mt-3 block text-sm font-medium text-gray-700">
-          Root path
-        </label>
-        <input
-          id="v-root"
-          name="root_path"
-          required
-          value={rootPath}
-          onChange={(e) => setRootPath(e.target.value)}
-          className={inputCls}
-        />
-
-        <label htmlFor="v-connection" className="mt-3 block text-sm font-medium text-gray-700">
-          Connection
-        </label>
-        <select
-          id="v-connection"
-          name="connection"
-          required
-          value={connectionId}
-          onChange={(e) => onConnectionChange(e.target.value)}
-          data-testid="v-connection"
-          className={inputCls}
-        >
-          <option value="" disabled>
-            {connectionsLoading ? "Loading…" : connections.length === 0 ? "No own connections" : "Choose a connection"}
-          </option>
-          {connections.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.label}
-            </option>
-          ))}
-        </select>
-
-        <label className="mt-3 flex items-center gap-2 text-sm font-medium text-gray-700">
-          <input
-            type="checkbox"
-            name="is_public"
-            data-testid="v-public"
-            checked={isPublic}
-            onChange={(e) => setIsPublic(e.target.checked)}
-          />
-          Public (anonymous browse + download)
-        </label>
-
-        {error && (
-          <p role="alert" className="mt-3 text-sm text-red-600">
-            {error}
-          </p>
-        )}
-
-        <div className="mt-4 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded border border-gray-300 px-3 py-1.5 text-sm">
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={busy}
-            data-testid="vdir-save"
-            className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {busy ? "Saving…" : "Save"}
-          </button>
-        </div>
-      </form>
-    </Dialog>
-  );
-}
-

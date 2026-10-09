@@ -1,12 +1,19 @@
 import { Navigate, Route, Routes } from "react-router";
 import { SessionProvider, useSession } from "./lib/session";
+import { Spinner } from "./components/Errors";
 import { AppShell } from "./components/AppShell";
-import { EmptyState, FailureState, Spinner } from "./components/Errors";
-import { useVdirs } from "./lib/useVdirs";
 import { LoginPage } from "./pages/LoginPage";
+import { LocationsPage } from "./pages/LocationsPage";
 import { BrowsePage } from "./pages/BrowsePage";
+import { PreviewPage } from "./pages/PreviewPage";
+import { MovePickerPage } from "./pages/MovePickerPage";
+import { UploadsPage } from "./pages/UploadsPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { ConnectionsPage } from "./pages/ConnectionsPage";
+import { ConnectionFormPage } from "./pages/ConnectionFormPage";
 import { VdirsPage } from "./pages/VdirsPage";
+import { VdirFormPage } from "./pages/VdirFormPage";
+import { SharingPage } from "./pages/SharingPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 
 export function App() {
@@ -24,28 +31,27 @@ function SessionGate() {
   const { state } = useSession();
   if (state === "checking") return <Spinner label="Checking session…" />;
   if (state === "anonymous") return <LoginPage />;
+  return <AppRoutes />;
+}
+
+export function AppRoutes() {
   return (
     <Routes>
       <Route element={<AppShell />}>
-        <Route path="/" element={<HomeRedirect />} />
+        <Route path="/" element={<Navigate to="/files" replace />} />
+        <Route path="/files" element={<LocationsPage />} />
+        <Route path="/v/:vdirId/view/*" element={<PreviewPage />} />
+        <Route path="/v/:vdirId/move" element={<MovePickerPage />} />
         <Route path="/v/:vdirId/*" element={<BrowsePage />} />
-        <Route path="/connections" element={<ConnectionsPage />} />
-        <Route path="/vdirs" element={<VdirsPage />} />
+        <Route path="/uploads" element={<UploadsPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/settings/connections" element={<ConnectionsPage />} />
+        <Route path="/settings/connections/:id" element={<ConnectionFormPage />} />
+        <Route path="/settings/vdirs" element={<VdirsPage />} />
+        <Route path="/settings/vdirs/:id" element={<VdirFormPage />} />
+        <Route path="/settings/vdirs/:id/sharing" element={<SharingPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
-  );
-}
-
-function HomeRedirect() {
-  const { vdirs, failure, loading, reload } = useVdirs();
-  if (loading) return <Spinner />;
-  if (failure) return <FailureState failure={failure} onRetry={reload} />;
-  if (vdirs.length > 0) return <Navigate to={`/v/${vdirs[0].id}`} replace />;
-  return (
-    <EmptyState
-      title="No virtual directories yet"
-      hint="Create a connection and a vdir to start browsing."
-    />
   );
 }
