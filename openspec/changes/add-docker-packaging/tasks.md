@@ -79,7 +79,7 @@
   pass with the embedded-asset changes.
 - [x] 5.3 Run `npx openspec validate --all --strict` and confirm the
   change and all specs validate.
-- [ ] 5.4 On a scratch `v*` tag, run the full release workflow end to
+- [x] 5.4 On a scratch `v*` tag, run the full release workflow end to
   end and confirm the container E2E passes and
   `harbor.alexklingenbeck.de/my/stratofold:<version>` exists.
 
@@ -90,7 +90,7 @@ repository, are gated on the first image existing in Harbor, and are
 operated exclusively through Git commits to `main` (never `kubectl` or
 SSH). Nothing from this group is documented in the Stratofold repository.
 
-- [ ] 6.1 Add `stratofold/resources.yaml` following the `trackify/`
+- [x] 6.1 Add `stratofold/resources.yaml` following the `trackify/`
   reference: namespace `stratofold`, a `harbor-creds` dockerconfigjson
   secret, a Longhorn `ReadWriteOnce` PVC mounted at `/pb_data`, a
   single-replica Deployment (`runAsUser`/`fsGroup` 1000, readiness
@@ -99,20 +99,20 @@ SSH). Nothing from this group is documented in the Stratofold repository.
   `stratofold.alexklingenbeck.de` (Traefik `websecure`,
   `letsencrypt-prod`); verify the manifests are committed and Flux applies
   them.
-- [ ] 6.2 Provision a superuser without baking credentials into the
+- [x] 6.2 Provision a superuser without baking credentials into the
   image (initContainer or one-off job running the binary's `superuser
   upsert` against the shared data volume); verify signing in at
   `https://stratofold.alexklingenbeck.de` works.
-- [ ] 6.3 Add the `flux-stratofold` Kustomization to
+- [x] 6.3 Add the `flux-stratofold` Kustomization to
   `my-cluster/cluster-kustomizations.yaml` with `dependsOn` `flux-longhorn`
   and `flux-cluster-issuer`; verify the instance is reachable over HTTPS
   with a valid certificate and that its data survives a pod restart.
-- [ ] 6.4 Add the `ImageRepository` + `ImagePolicy` for
+- [x] 6.4 Add the `ImageRepository` + `ImagePolicy` for
   `harbor.alexklingenbeck.de/my/stratofold` to
   `image-automation/1_repository_policy.yaml`; verify a subsequently
   published release tag is committed into the Deployment by the image
   automation and rolled out with no manual image edit.
-- [ ] 6.5 Confirm no Stratofold-side files document the cloud-repo
+- [x] 6.5 Confirm no Stratofold-side files document the cloud-repo
   deployment: `git status` in the Stratofold repo shows no new manifests
   or docs for it, and the only Stratofold-repo artifacts are the ADR 0006
   and docs updates already scoped in group 4.
