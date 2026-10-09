@@ -1,0 +1,1620 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Stratofold — iOS File Manager</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet"/>
+<style>
+    :root {
+      --ios-bg: #F2F2F7;
+      --ios-card: #FFFFFF;
+      --ios-blue: #007AFF;
+      --ios-red: #FF3B30;
+      --ios-green: #34C759;
+      --ios-separator: #E5E5EA;
+      --ios-label: #000000;
+      --ios-secondary: rgba(60, 60, 67, 0.60);
+      --ios-tertiary: rgba(60, 60, 67, 0.30);
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background-color: #0d0f14;
+      color: #e2e8f0;
+      user-select: none;
+    }
+    /* Simulated iPhone 15/16 Frame */
+    .iphone-case {
+      width: 390px;
+      height: 844px;
+      border-radius: 54px;
+      box-shadow: 0 0 0 12px #22252a, 0 0 0 14px #383d47, 0 25px 60px rgba(0,0,0,0.7);
+      position: relative;
+      overflow: hidden;
+      background-color: var(--ios-bg);
+      display: flex;
+      flex-direction: column;
+    }
+    /* Dynamic Island */
+    .dynamic-island {
+      width: 124px;
+      height: 35px;
+      background-color: #000000;
+      border-radius: 20px;
+      position: absolute;
+      top: 11px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      color: #fff;
+      font-size: 11px;
+    }
+    .home-indicator {
+      width: 138px;
+      height: 5px;
+      background-color: #000000;
+      border-radius: 10px;
+      position: absolute;
+      bottom: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 50;
+    }
+    .ios-blur {
+      backdrop-filter: blur(25px);
+      -webkit-backdrop-filter: blur(25px);
+    }
+    .middle-truncate {
+      display: inline-block;
+      max-width: 190px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    /* Custom Scrollbar for Phone Container */
+    .phone-screen-scroll::-webkit-scrollbar {
+      display: none;
+    }
+    .phone-screen-scroll {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    .screen-view {
+      display: none;
+      height: 100%;
+      flex-direction: column;
+    }
+    .screen-view.active {
+      display: flex;
+    }
+    /* Pulse animations */
+    @keyframes pulse-subtle {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .animate-pulse-subtle {
+      animation: pulse-subtle 1.8s infinite ease-in-out;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-start p-4 lg:p-8">
+<!-- Header & Specs Bar -->
+<header class="w-full max-w-6xl mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-gray-800 pb-4">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
+<svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"></path>
+<path d="M12 12v5m0 0 2-2m-2 2-2-2" stroke-linecap="round"></path>
+</svg>
+</div>
+<div>
+<div class="flex items-center gap-2">
+<h1 class="text-xl font-bold tracking-tight text-white">Stratofold</h1>
+<span class="text-xs bg-blue-500/20 text-blue-400 font-semibold px-2 py-0.5 rounded-full border border-blue-500/30">iOS Native HIG</span>
+<span class="text-xs bg-emerald-500/20 text-emerald-400 font-medium px-2 py-0.5 rounded-full border border-emerald-500/30">SSH/SFTP Personal Cloud</span>
+</div>
+<p class="text-xs text-gray-400">Pure streaming · 0 offline sync · Role-scoped virtual directories</p>
+</div>
+</div>
+<!-- Screen Navigator Selectors -->
+<div class="flex items-center gap-2 flex-wrap">
+<label class="text-xs text-gray-400 font-medium" for="screenSelect">Jump to Screen:</label>
+<select class="bg-gray-800 text-xs text-white border border-gray-700 rounded-lg px-3 py-2 outline-none focus:border-blue-500 transition-colors cursor-pointer" id="screenSelect">
+<optgroup label="Core Navigation Tabs">
+<option value="S2">S2 — Files: Locations (Root Tab)</option>
+<option value="S3">S3 — Folder Browse (List View)</option>
+<option value="S4">S4 — Folder Browse (Grid View)</option>
+<option value="S11">S11 — Uploads Tab (Active Queue)</option>
+<option value="S12">S12 — Settings Tab (Account &amp; Hub)</option>
+</optgroup>
+<optgroup label="Authentication &amp; States">
+<option value="S1">S1 — Login (Unauthenticated)</option>
+<option value="S18">S18 — Page Not Found (doc.questionmark)</option>
+<option value="S_ERR_PERM">S-ERR — Permission Denied (lock.fill)</option>
+<option value="S_ERR_UNAVAIL">S-ERR — Temporarily Unavailable (wifi.slash)</option>
+</optgroup>
+<optgroup label="File Details &amp; Context">
+<option value="S5">S5 — Context Menu (Long-press File)</option>
+<option value="S6_VIDEO">S6 — Media Player (Video Stream)</option>
+<option value="S6_AUDIO">S6 — Media Player (Audio Stream)</option>
+<option value="S6B">S6b — File Preview (Quick Look)</option>
+</optgroup>
+<optgroup label="File Operations (Owner/Editor)">
+<option value="S7">S7 — New Folder Bottom Sheet</option>
+<option value="S8">S8 — Rename File Bottom Sheet</option>
+<option value="S9">S9 — Move Picker (Folder Tree)</option>
+<option value="S10">S10 — Delete Destructive Alert</option>
+</optgroup>
+<optgroup label="Settings Sub-Views">
+<option value="S13">S13 — Connections List (SFTP Hosts)</option>
+<option value="S14">S14 — Connection Form (Full Sheet)</option>
+<option value="S15">S15 — Virtual Directories List</option>
+<option value="S16">S16 — Vdir Form &amp; Settings</option>
+<option value="S17">S17 — Sharing &amp; Access Controls</option>
+</optgroup>
+</select>
+</div>
+</header>
+<!-- Interactive Presentation Studio -->
+<div class="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+<!-- Left Spec & Interaction Deck -->
+<div class="lg:col-span-5 flex flex-col gap-5 order-2 lg:order-1">
+<!-- Active Screen Metadata Card -->
+<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-lg">
+<div class="flex items-center justify-between mb-3">
+<span class="text-xs font-mono px-2.5 py-1 rounded-md bg-blue-500/20 text-blue-400 font-bold border border-blue-500/30" id="badgeSpecId">S3 — BROWSE (LIST)</span>
+<span class="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400" id="badgeRole">Owner View</span>
+</div>
+<h2 class="text-lg font-bold text-white mb-2" id="specTitle">Folder Browse (List Mode)</h2>
+<p class="text-sm text-gray-300 leading-relaxed mb-4" id="specDesc">
+          Hierarchical SFTP file exploration. Folder-first sorting, middle-truncated filenames, live file metadata, and quick action bar (New Folder, Upload, Sort, Grid toggle).
+        </p>
+<!-- HIG Checklist Verification -->
+<div class="space-y-2 text-xs border-t border-gray-800 pt-3">
+<div class="flex items-center text-gray-400">
+<span class="w-2 h-2 rounded-full bg-emerald-400 mr-2"></span>
+<span class="text-gray-300 font-medium">Safe Areas:</span>
+<span class="ml-1 text-gray-400">47pt Dynamic Island, 34pt Home Bar</span>
+</div>
+<div class="flex items-center text-gray-400">
+<span class="w-2 h-2 rounded-full bg-emerald-400 mr-2"></span>
+<span class="text-gray-300 font-medium">Touch Targets:</span>
+<span class="ml-1 text-gray-400">Strict ≥44pt touch boundary &amp; ~56pt list rows</span>
+</div>
+<div class="flex items-center text-gray-400">
+<span class="w-2 h-2 rounded-full bg-emerald-400 mr-2"></span>
+<span class="text-gray-300 font-medium">Role Gating:</span>
+<span class="ml-1 text-gray-400">Viewer/Public hides all write controls</span>
+</div>
+</div>
+</div>
+<!-- Quick Interactive Switcher Buttons -->
+<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-lg">
+<h3 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Flow Quick Actions</h3>
+<div class="grid grid-cols-2 gap-2 text-xs">
+<button class="p-2.5 text-left rounded-xl bg-gray-800/80 hover:bg-gray-700/80 text-white font-medium transition flex items-center justify-between" onclick="switchScreen('S2')" type="button">
+<span>📁 Vdirs Root</span>
+<span class="text-gray-500 text-[10px]">S2</span>
+</button>
+<button class="p-2.5 text-left rounded-xl bg-gray-800/80 hover:bg-gray-700/80 text-white font-medium transition flex items-center justify-between" onclick="switchScreen('S3')" type="button">
+<span>📑 List View</span>
+<span class="text-gray-500 text-[10px]">S3</span>
+</button>
+<button class="p-2.5 text-left rounded-xl bg-gray-800/80 hover:bg-gray-700/80 text-white font-medium transition flex items-center justify-between" onclick="switchScreen('S4')" type="button">
+<span>▦ Grid View</span>
+<span class="text-gray-500 text-[10px]">S4</span>
+</button>
+<button class="p-2.5 text-left rounded-xl bg-gray-800/80 hover:bg-gray-700/80 text-white font-medium transition flex items-center justify-between" onclick="switchScreen('S5')" type="button">
+<span>✨ Context Menu</span>
+<span class="text-gray-500 text-[10px]">S5</span>
+</button>
+<button class="p-2.5 text-left rounded-xl bg-gray-800/80 hover:bg-gray-700/80 text-white font-medium transition flex items-center justify-between" onclick="switchScreen('S6_VIDEO')" type="button">
+<span>🎬 Media Player</span>
+<span class="text-gray-500 text-[10px]">S6</span>
+</button>
+<button class="p-2.5 text-left rounded-xl bg-gray-800/80 hover:bg-gray-700/80 text-white font-medium transition flex items-center justify-between" onclick="switchScreen('S11')" type="button">
+<span>🚀 Uploads (3 active)</span>
+<span class="text-gray-500 text-[10px]">S11</span>
+</button>
+<button class="p-2.5 text-left rounded-xl bg-gray-800/80 hover:bg-gray-700/80 text-white font-medium transition flex items-center justify-between" onclick="switchScreen('S14')" type="button">
+<span>🖥 SFTP Config</span>
+<span class="text-gray-500 text-[10px]">S14</span>
+</button>
+<button class="p-2.5 text-left rounded-xl bg-gray-800/80 hover:bg-gray-700/80 text-white font-medium transition flex items-center justify-between" onclick="switchScreen('S17')" type="button">
+<span>👥 Access &amp; Roles</span>
+<span class="text-gray-500 text-[10px]">S17</span>
+</button>
+</div>
+<!-- Role Simulator Toggle -->
+<div class="mt-4 pt-3 border-t border-gray-800 flex items-center justify-between">
+<span class="text-xs text-gray-300 font-medium">Role Simulator:</span>
+<div class="flex bg-gray-800 rounded-lg p-0.5 text-[11px]">
+<button class="px-2.5 py-1 rounded-md bg-blue-600 text-white font-medium" id="roleOwnerBtn" onclick="setRole('owner')" type="button">Owner</button>
+<button class="px-2.5 py-1 rounded-md text-gray-400 hover:text-white" id="roleViewerBtn" onclick="setRole('viewer')" type="button">Viewer / Public</button>
+</div>
+</div>
+</div>
+<!-- State Discipline Indicators -->
+<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-lg text-xs space-y-2">
+<h3 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Required States Coverage</h3>
+<div class="grid grid-cols-2 gap-2">
+<button class="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800 text-left text-gray-300 flex items-center gap-2" onclick="switchScreen('S_ERR_UNAVAIL')" type="button">
+<i class="fa-solid fa-wifi text-amber-400 text-xs"></i>
+<span>Unavailable (Retry)</span>
+</button>
+<button class="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800 text-left text-gray-300 flex items-center gap-2" onclick="switchScreen('S_ERR_PERM')" type="button">
+<i class="fa-solid fa-lock text-rose-400 text-xs"></i>
+<span>Permission Denied</span>
+</button>
+<button class="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800 text-left text-gray-300 flex items-center gap-2" onclick="switchScreen('S18')" type="button">
+<i class="fa-solid fa-file-circle-question text-blue-400 text-xs"></i>
+<span>Not Found (S18)</span>
+</button>
+<button class="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800 text-left text-gray-300 flex items-center gap-2" onclick="switchScreen('S10')" type="button">
+<i class="fa-solid fa-trash text-red-500 text-xs"></i>
+<span>Delete Modal (S10)</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Right: Simulated iPhone Hardware Canvas (390 x 844) -->
+<div class="lg:col-span-7 flex justify-center order-1 lg:order-2">
+<div class="iphone-case">
+<!-- Native Dynamic Island -->
+<div class="dynamic-island">
+<span class="text-[10px] font-semibold text-gray-400 flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+            SFTP
+          </span>
+<div class="w-2.5 h-2.5 rounded-full bg-blue-500/80 animate-pulse-subtle"></div>
+</div>
+<!-- Native Status Bar -->
+<div class="h-12 w-full pt-3 px-7 flex items-center justify-between text-black text-[13px] font-semibold z-40 select-none">
+<span>9:41</span>
+<div class="flex items-center space-x-1.5">
+<i class="fa-solid fa-signal text-[11px]"></i>
+<i class="fa-solid fa-wifi text-[11px]"></i>
+<i class="fa-solid fa-battery-full text-xs"></i>
+</div>
+</div>
+<!-- Screen Contents Viewport -->
+<div class="flex-1 overflow-hidden relative">
+<!-- ============================================== -->
+<!-- S1: LOGIN (Unauthenticated) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-[#F2F2F7] px-6 flex flex-col justify-center items-center" id="view-S1">
+<!-- App Geometric Glyph Mark -->
+<div class="w-20 h-20 bg-gradient-to-br from-blue-500 to-blue-600 rounded-3xl shadow-lg shadow-blue-500/25 flex items-center justify-center text-white mb-4">
+<svg class="w-11 h-11" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" viewbox="0 0 24 24">
+<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"></path>
+<path d="M12 11.5v5m0 0 2-2m-2 2-2-2"></path>
+</svg>
+</div>
+<h1 class="text-2xl font-bold text-black tracking-tight mb-1">Stratofold</h1>
+<p class="text-sm text-[#3C3C43]/70 mb-7">Sign in to your files</p>
+<!-- Error Banner -->
+<div class="w-full bg-[#FF3B30]/10 border border-[#FF3B30]/20 rounded-xl p-3 mb-4 flex items-center gap-2.5 text-[#FF3B30] text-xs font-medium" id="loginErrorBanner">
+<i class="fa-solid fa-circle-exclamation text-sm"></i>
+<span>Invalid credentials or SSH key pair rejected.</span>
+</div>
+<!-- Inset Grouped Login Card -->
+<div class="w-full bg-white rounded-2xl overflow-hidden shadow-sm border border-black/5 divide-y divide-[#E5E5EA] mb-6">
+<div class="px-4 py-3.5 flex items-center">
+<span class="w-20 text-sm font-normal text-[#3C3C43]/80">Email</span>
+<input class="flex-1 text-sm text-black outline-none bg-transparent" placeholder="name@domain.com" type="email" value="alexander@stratofold.internal"/>
+</div>
+<div class="px-4 py-3.5 flex items-center">
+<span class="w-20 text-sm font-normal text-[#3C3C43]/80">Password</span>
+<input class="flex-1 text-sm text-black outline-none bg-transparent" id="loginPassInput" type="password" value="••••••••••••"/>
+<button class="text-[#3C3C43]/50 hover:text-black" onclick="togglePasswordVisibility()" type="button">
+<i class="fa-regular fa-eye text-sm" id="eyeIcon"></i>
+</button>
+</div>
+</div>
+<!-- Full-width Primary Button -->
+<button class="w-full h-12 rounded-xl bg-[#007AFF] text-white font-semibold text-base shadow-sm active:opacity-80 transition flex items-center justify-center gap-2" onclick="handleLoginClick(this)">
+<span id="loginBtnText">Sign In</span>
+</button>
+<p class="mt-4 text-xs text-[#3C3C43]/60 text-center">
+              Files remain on your own SSH servers.<br/>Zero telemetry or offline caching.
+            </p>
+</div>
+<!-- ============================================== -->
+<!-- S2: FILES TAB: LOCATIONS (Root of Tab 1) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-[#F2F2F7] flex flex-col" id="view-S2">
+<!-- Nav Bar & Large Title -->
+<div class="px-5 pt-2 pb-3">
+<h1 class="text-[34px] font-bold text-black tracking-tight leading-tight">Files</h1>
+</div>
+<div class="flex-1 overflow-y-auto px-4 pb-24 phone-screen-scroll">
+<!-- Pull to Refresh Simulation Hint -->
+<div class="flex items-center justify-center py-1 text-xs text-[#3C3C43]/40">
+<i class="fa-solid fa-arrow-down mr-1 text-[10px]"></i> Pull down to refresh SSH mounts
+              </div>
+<!-- Section: My vdirs -->
+<div class="mb-6">
+<div class="px-2 py-1 text-xs font-semibold text-[#3C3C43]/60 uppercase tracking-wider">My Virtual Directories</div>
+<div class="bg-white rounded-2xl shadow-sm border border-black/5 divide-y divide-[#E5E5EA] overflow-hidden">
+<!-- Row 1: Production Backup (Private) -->
+<div class="px-4 py-3.5 flex items-center justify-between active:bg-[#F2F2F7] cursor-pointer" onclick="switchScreen('S3')">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-[#007AFF]">
+<i class="fa-solid fa-folder text-base"></i>
+</div>
+<div>
+<div class="text-base font-semibold text-black">Production Backups</div>
+<div class="text-xs text-[#3C3C43]/60">srv1.us-east · /var/backups</div>
+</div>
+</div>
+<i class="fa-solid fa-chevron-right text-xs text-[#3C3C43]/30"></i>
+</div>
+<!-- Row 2: Media Vault (Public) -->
+<div class="px-4 py-3.5 flex items-center justify-between active:bg-[#F2F2F7] cursor-pointer" onclick="switchScreen('S3')">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-[#007AFF]">
+<i class="fa-solid fa-folder text-base"></i>
+</div>
+<div>
+<div class="flex items-center gap-2">
+<span class="text-base font-semibold text-black">Media Vault</span>
+<span class="bg-[#34C759]/15 text-[#34C759] text-[10px] font-bold px-1.5 py-0.5 rounded-full">Public</span>
+</div>
+<div class="text-xs text-[#3C3C43]/60">nas-home.local · /pool/media</div>
+</div>
+</div>
+<i class="fa-solid fa-chevron-right text-xs text-[#3C3C43]/30"></i>
+</div>
+<!-- Row 3: Research Archives -->
+<div class="px-4 py-3.5 flex items-center justify-between active:bg-[#F2F2F7] cursor-pointer" onclick="switchScreen('S3')">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-[#007AFF]">
+<i class="fa-solid fa-folder text-base"></i>
+</div>
+<div>
+<div class="text-base font-semibold text-black">Research Papers</div>
+<div class="text-xs text-[#3C3C43]/60">lab-node-04 · /mnt/datasets</div>
+</div>
+</div>
+<i class="fa-solid fa-chevron-right text-xs text-[#3C3C43]/30"></i>
+</div>
+</div>
+</div>
+<!-- Section: Shared with me -->
+<div class="mb-4">
+<div class="px-2 py-1 text-xs font-semibold text-[#3C3C43]/60 uppercase tracking-wider">Shared with me</div>
+<div class="bg-white rounded-2xl shadow-sm border border-black/5 divide-y divide-[#E5E5EA] overflow-hidden">
+<div class="px-4 py-3.5 flex items-center justify-between active:bg-[#F2F2F7] cursor-pointer" onclick="switchScreen('S3')">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600">
+<i class="fa-solid fa-user-group text-sm"></i>
+</div>
+<div>
+<div class="text-base font-semibold text-black">Engineering Assets</div>
+<div class="text-xs text-[#3C3C43]/60">Shared by user-e90fa2 · Editor</div>
+</div>
+</div>
+<i class="fa-solid fa-chevron-right text-xs text-[#3C3C43]/30"></i>
+</div>
+</div>
+</div>
+<!-- Footer Navigation Link -->
+<div class="text-center py-2">
+<button class="text-sm font-medium text-[#007AFF] hover:underline" onclick="switchScreen('S15')">
+                  Manage vdirs
+                </button>
+</div>
+</div>
+</div>
+<!-- ============================================== -->
+<!-- S3: FOLDER BROWSE (List View) -->
+<!-- ============================================== -->
+<div class="screen-view active h-full bg-[#F2F2F7] flex flex-col" id="view-S3">
+<!-- Nav Bar with Back Chevron & Current Title -->
+<div class="px-4 pt-1 pb-1">
+<div class="flex items-center justify-between">
+<button class="flex items-center text-[#007AFF] text-base font-normal -ml-1" onclick="switchScreen('S2')">
+<i class="fa-solid fa-chevron-left text-sm mr-1"></i> Files
+                </button>
+<div class="text-xs text-[#3C3C43]/50 font-mono">SSH Connected</div>
+</div>
+<h1 class="text-[30px] font-bold text-black tracking-tight mt-0.5">Media Vault</h1>
+<!-- Tertiary Breadcrumb Path -->
+<div class="text-[12px] text-[#3C3C43]/70 font-medium truncate">
+<span class="hover:text-[#007AFF] cursor-pointer" onclick="switchScreen('S2')">Media Vault</span>
+<span class="mx-1 text-[#3C3C43]/30">/</span>
+<span class="text-black font-semibold">2026_Keynotes_HQ</span>
+</div>
+</div>
+<!-- Compact Toolbar Row -->
+<div class="px-4 py-2 border-y border-[#E5E5EA] bg-[#F2F2F7] flex items-center justify-between text-xs">
+<div class="flex items-center gap-2">
+<!-- Sort control -->
+<button class="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-[#E5E5EA] rounded-lg font-medium text-black shadow-xs">
+<i class="fa-solid fa-arrow-down-short-wide text-[#007AFF]"></i>
+<span>Name (A→Z)</span>
+</button>
+<!-- List/Grid Segmented Toggle -->
+<div class="flex bg-[#E5E5EA] p-0.5 rounded-lg">
+<button class="px-2 py-1 rounded-md bg-white text-black shadow-xs font-semibold">
+<i class="fa-solid fa-list-ul"></i>
+</button>
+<button class="px-2 py-1 rounded-md text-[#3C3C43]/70 hover:text-black" onclick="switchScreen('S4')">
+<i class="fa-solid fa-table-cells-large"></i>
+</button>
+</div>
+</div>
+<!-- Action Pills (Owner / Editor Only) -->
+<div class="flex items-center gap-1.5" id="writeActionsToolbar">
+<button class="px-2.5 py-1.5 bg-white border border-[#E5E5EA] text-black font-medium rounded-full shadow-xs flex items-center gap-1 hover:bg-gray-50" onclick="switchScreen('S7')">
+<i class="fa-solid fa-folder-plus text-[#007AFF]"></i>
+<span>New</span>
+</button>
+<button class="px-3 py-1.5 bg-[#007AFF] text-white font-medium rounded-full shadow-xs flex items-center gap-1 hover:bg-blue-600" onclick="switchScreen('S11')">
+<i class="fa-solid fa-arrow-up-from-bracket"></i>
+<span>Upload</span>
+</button>
+</div>
+</div>
+<!-- Inset Grouped File List -->
+<div class="flex-1 overflow-y-auto px-4 py-3 pb-24 phone-screen-scroll">
+<div class="bg-white rounded-2xl shadow-sm border border-black/5 divide-y divide-[#E5E5EA] overflow-hidden">
+<!-- Folder 1 (Folders always sort before files) -->
+<div class="px-4 py-3.5 flex items-center justify-between active:bg-[#F2F2F7] cursor-pointer" onclick="switchScreen('S3')" oncontextmenu="event.preventDefault(); switchScreen('S5');">
+<div class="flex items-center gap-3 overflow-hidden">
+<div class="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-[#007AFF] shrink-0">
+<i class="fa-solid fa-folder text-base"></i>
+</div>
+<div class="truncate">
+<div class="text-base font-semibold text-black middle-truncate">01_Opening_Stream_4K</div>
+<div class="text-xs text-[#3C3C43]/50">3 items · Folder</div>
+</div>
+</div>
+<div class="flex items-center gap-2 shrink-0">
+<span class="text-xs text-[#3C3C43]/50">—</span>
+<i class="fa-solid fa-chevron-right text-xs text-[#3C3C43]/30"></i>
+</div>
+</div>
+<!-- Folder 2 -->
+<div class="px-4 py-3.5 flex items-center justify-between active:bg-[#F2F2F7] cursor-pointer" onclick="switchScreen('S3')" oncontextmenu="event.preventDefault(); switchScreen('S5');">
+<div class="flex items-center gap-3 overflow-hidden">
+<div class="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-[#007AFF] shrink-0">
+<i class="fa-solid fa-folder text-base"></i>
+</div>
+<div class="truncate">
+<div class="text-base font-semibold text-black middle-truncate">Staging_Raw_Footage</div>
+<div class="text-xs text-[#3C3C43]/50">Oct 4, 2026</div>
+</div>
+</div>
+<div class="flex items-center gap-2 shrink-0">
+<span class="text-xs text-[#3C3C43]/50">—</span>
+<i class="fa-solid fa-chevron-right text-xs text-[#3C3C43]/30"></i>
+</div>
+</div>
+<!-- Video File (Tap opens S6 Video Player, Long-press context menu) -->
+<div class="px-4 py-3.5 flex items-center justify-between active:bg-[#F2F2F7] cursor-pointer" onclick="switchScreen('S6_VIDEO')" oncontextmenu="event.preventDefault(); switchScreen('S5');">
+<div class="flex items-center gap-3 overflow-hidden">
+<div class="w-8 h-8 rounded-lg bg-violet-50 flex items-center justify-center text-violet-600 shrink-0">
+<i class="fa-solid fa-film text-sm"></i>
+</div>
+<div class="truncate">
+<div class="text-base font-semibold text-black middle-truncate">Keynote_Executive_Full_HDR.mov</div>
+<div class="text-xs text-[#3C3C43]/50">Oct 4, 2026</div>
+</div>
+</div>
+<div class="text-right shrink-0">
+<div class="text-sm text-black font-medium">1.84 GB</div>
+<div class="text-[11px] text-[#34C759] font-medium">HTTP Stream</div>
+</div>
+</div>
+<!-- Audio File (Tap opens S6 Audio) -->
+<div class="px-4 py-3.5 flex items-center justify-between active:bg-[#F2F2F7] cursor-pointer" onclick="switchScreen('S6_AUDIO')" oncontextmenu="event.preventDefault(); switchScreen('S5');">
+<div class="flex items-center gap-3 overflow-hidden">
+<div class="w-8 h-8 rounded-lg bg-pink-50 flex items-center justify-center text-pink-600 shrink-0">
+<i class="fa-solid fa-music text-sm"></i>
+</div>
+<div class="truncate">
+<div class="text-base font-semibold text-black middle-truncate">Atmospheric_Score_Track09.flac</div>
+<div class="text-xs text-[#3C3C43]/50">Oct 2, 2026</div>
+</div>
+</div>
+<div class="text-right shrink-0">
+<div class="text-sm text-black font-medium">48.2 MB</div>
+<div class="text-[11px] text-[#3C3C43]/40">Audio</div>
+</div>
+</div>
+<!-- Image File (Tap opens S6b File Preview) -->
+<div class="px-4 py-3.5 flex items-center justify-between active:bg-[#F2F2F7] cursor-pointer" onclick="switchScreen('S6B')" oncontextmenu="event.preventDefault(); switchScreen('S5');">
+<div class="flex items-center gap-3 overflow-hidden">
+<div class="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center text-[#34C759] shrink-0">
+<i class="fa-solid fa-image text-sm"></i>
+</div>
+<div class="truncate">
+<div class="text-base font-semibold text-black middle-truncate">Press_Release_Hero_RAW.dng</div>
+<div class="text-xs text-[#3C3C43]/50">Sep 28, 2026</div>
+</div>
+</div>
+<div class="text-right shrink-0">
+<div class="text-sm text-black font-medium">32.6 MB</div>
+<div class="text-[11px] text-[#3C3C43]/40">Image</div>
+</div>
+</div>
+<!-- PDF Document (Generic doc) -->
+<div class="px-4 py-3.5 flex items-center justify-between active:bg-[#F2F2F7] cursor-pointer" onclick="switchScreen('S6B')" oncontextmenu="event.preventDefault(); switchScreen('S5');">
+<div class="flex items-center gap-3 overflow-hidden">
+<div class="w-8 h-8 rounded-lg bg-orange-50 flex items-center justify-center text-orange-600 shrink-0">
+<i class="fa-solid fa-file-lines text-sm"></i>
+</div>
+<div class="truncate">
+<div class="text-base font-semibold text-black middle-truncate">SSH_Tunnel_Config_Spec.pdf</div>
+<div class="text-xs text-[#3C3C43]/50">Sep 24, 2026</div>
+</div>
+</div>
+<div class="text-right shrink-0">
+<div class="text-sm text-black font-medium">4.2 MB</div>
+<div class="text-[11px] text-[#3C3C43]/40">Doc</div>
+</div>
+</div>
+</div>
+<div class="text-center py-4 text-xs text-[#3C3C43]/40">
+<span>6 items on SSH mount · 1.92 GB total</span>
+</div>
+</div>
+</div>
+<!-- ============================================== -->
+<!-- S4: FOLDER BROWSE (Grid View) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-[#F2F2F7] flex flex-col" id="view-S4">
+<!-- Nav Bar -->
+<div class="px-4 pt-1 pb-1">
+<div class="flex items-center justify-between">
+<button class="flex items-center text-[#007AFF] text-base" onclick="switchScreen('S2')">
+<i class="fa-solid fa-chevron-left text-sm mr-1"></i> Files
+                </button>
+<div class="text-xs text-[#3C3C43]/50">Media Vault</div>
+</div>
+<h1 class="text-[30px] font-bold text-black tracking-tight mt-0.5">2026_Keynotes</h1>
+</div>
+<!-- Toolbar Row -->
+<div class="px-4 py-2 border-y border-[#E5E5EA] bg-[#F2F2F7] flex items-center justify-between text-xs">
+<div class="flex items-center gap-2">
+<button class="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-[#E5E5EA] rounded-lg font-medium text-black">
+<i class="fa-solid fa-arrow-down-short-wide text-[#007AFF]"></i>
+<span>Sort</span>
+</button>
+<div class="flex bg-[#E5E5EA] p-0.5 rounded-lg">
+<button class="px-2 py-1 rounded-md text-[#3C3C43]/70 hover:text-black" onclick="switchScreen('S3')">
+<i class="fa-solid fa-list-ul"></i>
+</button>
+<button class="px-2 py-1 rounded-md bg-white text-black shadow-xs font-semibold">
+<i class="fa-solid fa-table-cells-large"></i>
+</button>
+</div>
+</div>
+<div class="flex items-center gap-1.5">
+<button class="px-2.5 py-1.5 bg-white border border-[#E5E5EA] text-black font-medium rounded-full" onclick="switchScreen('S7')">
+<i class="fa-solid fa-folder-plus text-[#007AFF] mr-1"></i>New
+                </button>
+<button class="px-3 py-1.5 bg-[#007AFF] text-white font-medium rounded-full" onclick="switchScreen('S11')">
+<i class="fa-solid fa-arrow-up-from-bracket mr-1"></i>Upload
+                </button>
+</div>
+</div>
+<!-- 3-Column Grid Cards -->
+<div class="flex-1 overflow-y-auto p-4 pb-24 phone-screen-scroll">
+<div class="grid grid-cols-3 gap-3">
+<div class="bg-white rounded-xl p-3 flex flex-col items-center justify-center text-center shadow-xs border border-black/5 active:scale-95 transition aspect-square cursor-pointer" onclick="switchScreen('S3')">
+<i class="fa-solid fa-folder text-3xl text-[#007AFF] mb-2"></i>
+<span class="text-xs font-semibold text-black line-clamp-2">01_Opening_Stream</span>
+</div>
+<div class="bg-white rounded-xl p-3 flex flex-col items-center justify-center text-center shadow-xs border border-black/5 active:scale-95 transition aspect-square cursor-pointer" onclick="switchScreen('S3')">
+<i class="fa-solid fa-folder text-3xl text-[#007AFF] mb-2"></i>
+<span class="text-xs font-semibold text-black line-clamp-2">Staging_Footage</span>
+</div>
+<div class="bg-white rounded-xl p-3 flex flex-col items-center justify-center text-center shadow-xs border border-black/5 active:scale-95 transition aspect-square cursor-pointer" onclick="switchScreen('S6_VIDEO')">
+<i class="fa-solid fa-film text-3xl text-violet-600 mb-2"></i>
+<span class="text-xs font-semibold text-black line-clamp-2">Keynote_Exec.mov</span>
+</div>
+<div class="bg-white rounded-xl p-3 flex flex-col items-center justify-center text-center shadow-xs border border-black/5 active:scale-95 transition aspect-square cursor-pointer" onclick="switchScreen('S6_AUDIO')">
+<i class="fa-solid fa-music text-3xl text-pink-600 mb-2"></i>
+<span class="text-xs font-semibold text-black line-clamp-2">Atmospheric_Score.flac</span>
+</div>
+<div class="bg-white rounded-xl p-3 flex flex-col items-center justify-center text-center shadow-xs border border-black/5 active:scale-95 transition aspect-square cursor-pointer" onclick="switchScreen('S6B')">
+<i class="fa-solid fa-image text-3xl text-[#34C759] mb-2"></i>
+<span class="text-xs font-semibold text-black line-clamp-2">Press_Release_Hero.dng</span>
+</div>
+<div class="bg-white rounded-xl p-3 flex flex-col items-center justify-center text-center shadow-xs border border-black/5 active:scale-95 transition aspect-square cursor-pointer" onclick="switchScreen('S6B')">
+<i class="fa-solid fa-file-lines text-3xl text-orange-600 mb-2"></i>
+<span class="text-xs font-semibold text-black line-clamp-2">Tunnel_Spec.pdf</span>
+</div>
+</div>
+</div>
+</div>
+<!-- ============================================== -->
+<!-- S5: CONTEXT MENU (Long-press simulated) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-black/40 ios-blur flex flex-col justify-end p-4 pb-12 z-50" id="view-S5">
+<!-- Simulated Focused Floating Row Item -->
+<div class="bg-white rounded-2xl p-4 shadow-2xl mb-4 border border-black/10 flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center text-violet-600 text-lg">
+<i class="fa-solid fa-film"></i>
+</div>
+<div>
+<div class="text-base font-bold text-black">Keynote_Executive_Full_HDR.mov</div>
+<div class="text-xs text-[#3C3C43]/60">1.84 GB · Video (H.265 / SFTP Stream)</div>
+</div>
+</div>
+</div>
+<!-- iOS Context Action Menu Stack -->
+<div class="bg-white/95 rounded-2xl shadow-xl overflow-hidden divide-y divide-[#E5E5EA] text-base mb-3 border border-black/10">
+<button class="w-full px-5 py-3.5 text-left text-black font-normal hover:bg-gray-100 flex items-center justify-between" onclick="switchScreen('S6_VIDEO')">
+<span>Open in Player</span>
+<i class="fa-regular fa-circle-play text-gray-500"></i>
+</button>
+<button class="w-full px-5 py-3.5 text-left text-black font-normal hover:bg-gray-100 flex items-center justify-between" onclick="alert('Starting SFTP file direct download to iOS Files app...');">
+<span>Download</span>
+<i class="fa-solid fa-arrow-down-to-bracket text-gray-500"></i>
+</button>
+<!-- Role-gated items for Owner / Editor -->
+<div class="divide-y divide-[#E5E5EA]" id="contextOwnerOnlyActions">
+<button class="w-full px-5 py-3.5 text-left text-black font-normal hover:bg-gray-100 flex items-center justify-between" onclick="switchScreen('S8')">
+<span>Rename…</span>
+<i class="fa-solid fa-pencil text-gray-500"></i>
+</button>
+<button class="w-full px-5 py-3.5 text-left text-black font-normal hover:bg-gray-100 flex items-center justify-between" onclick="switchScreen('S9')">
+<span>Move…</span>
+<i class="fa-solid fa-folder-tree text-gray-500"></i>
+</button>
+<button class="w-full px-5 py-3.5 text-left text-[#FF3B30] font-medium hover:bg-gray-100 flex items-center justify-between" onclick="switchScreen('S10')">
+<span>Delete</span>
+<i class="fa-regular fa-trash-can text-[#FF3B30]"></i>
+</button>
+</div>
+</div>
+<button class="w-full py-3.5 bg-white text-black font-semibold rounded-2xl shadow-md" onclick="switchScreen('S3')">
+              Dismiss
+            </button>
+</div>
+<!-- ============================================== -->
+<!-- S6: MEDIA PLAYER (Video Stream, Dark Immersive) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-black text-white flex flex-col justify-between p-5 pb-10" id="view-S6_VIDEO">
+<!-- Top Controls -->
+<div class="flex items-center justify-between pt-2">
+<button class="text-sm font-semibold text-white px-3 py-1.5 bg-white/20 rounded-full backdrop-blur-md" onclick="switchScreen('S3')">
+                Done
+              </button>
+<div class="text-center">
+<span class="text-xs text-white/60 block font-mono">1080p 60fps · Pure Stream</span>
+<span class="text-sm font-semibold truncate max-w-[180px] block">Keynote_Executive_Full_HDR.mov</span>
+</div>
+<button class="text-white/80 hover:text-white text-base">
+<i class="fa-solid fa-airplay"></i>
+</button>
+</div>
+<!-- Video Center Canvas Simulated Frame -->
+<div class="relative w-full aspect-video bg-neutral-900 rounded-2xl overflow-hidden border border-white/10 flex items-center justify-center my-auto">
+<div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30"></div>
+<div class="text-center z-10">
+<div class="w-16 h-16 rounded-full bg-white/20 border border-white/30 backdrop-blur-lg flex items-center justify-center text-white text-2xl mb-2 mx-auto cursor-pointer hover:scale-105 active:scale-95 transition">
+<i class="fa-solid fa-play ml-1"></i>
+</div>
+<div class="text-xs text-white/70">SFTP Live Stream (No caching)</div>
+</div>
+</div>
+<!-- Bottom Transport & Scrubber -->
+<div class="space-y-4">
+<!-- Scrubber Bar -->
+<div>
+<div class="w-full bg-white/20 h-1.5 rounded-full overflow-hidden relative cursor-pointer">
+<div class="bg-[#007AFF] h-full w-[42%]"></div>
+</div>
+<div class="flex justify-between text-xs text-white/60 mt-1.5 font-mono">
+<span>14:20</span>
+<span>-19:40</span>
+</div>
+</div>
+<!-- Transport Buttons -->
+<div class="flex items-center justify-center gap-8 text-xl text-white">
+<button class="hover:text-[#007AFF]"><i class="fa-solid fa-rotate-left text-base"></i> <span class="text-[10px] block">15s</span></button>
+<button class="w-12 h-12 rounded-full bg-white text-black flex items-center justify-center text-lg active:scale-95"><i class="fa-solid fa-pause"></i></button>
+<button class="hover:text-[#007AFF]"><i class="fa-solid fa-rotate-right text-base"></i> <span class="text-[10px] block">15s</span></button>
+</div>
+<!-- Volume Control -->
+<div class="flex items-center gap-3 px-4 text-white/60 text-xs">
+<i class="fa-solid fa-volume-low"></i>
+<div class="flex-1 bg-white/20 h-1 rounded-full overflow-hidden">
+<div class="bg-white h-full w-3/4"></div>
+</div>
+<i class="fa-solid fa-volume-high"></i>
+</div>
+</div>
+</div>
+<!-- ============================================== -->
+<!-- S6: MEDIA PLAYER (Audio Stream) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-[#1C1C1E] text-white flex flex-col justify-between p-6 pb-12" id="view-S6_AUDIO">
+<!-- Header -->
+<div class="flex items-center justify-between">
+<button class="text-sm font-semibold text-[#007AFF]" onclick="switchScreen('S3')">
+<i class="fa-solid fa-chevron-down mr-1"></i> Dismiss
+              </button>
+<span class="text-xs font-semibold text-white/40 uppercase tracking-widest">Audio Stream</span>
+<div class="w-8"></div>
+</div>
+<!-- Artwork Area -->
+<div class="flex flex-col items-center justify-center my-auto">
+<div class="w-56 h-56 rounded-3xl bg-gradient-to-tr from-pink-600 to-rose-400 shadow-2xl flex items-center justify-center text-white text-6xl mb-6 shadow-rose-900/30">
+<i class="fa-solid fa-music"></i>
+</div>
+<h2 class="text-xl font-bold text-white text-center middle-truncate max-w-[260px]">Atmospheric_Score_Track09.flac</h2>
+<p class="text-sm text-white/50 mt-1">24-bit / 96kHz Lossless FLAC</p>
+</div>
+<!-- Audio Controls -->
+<div class="space-y-5">
+<div>
+<div class="w-full bg-white/20 h-1.5 rounded-full overflow-hidden">
+<div class="bg-white h-full w-[65%]"></div>
+</div>
+<div class="flex justify-between text-xs text-white/50 mt-1.5 font-mono">
+<span>3:12</span>
+<span>-1:45</span>
+</div>
+</div>
+<div class="flex items-center justify-center gap-10 text-2xl text-white">
+<button class="text-white/70 hover:text-white"><i class="fa-solid fa-backward-step"></i></button>
+<button class="w-14 h-14 rounded-full bg-white text-black flex items-center justify-center text-xl shadow-lg active:scale-95"><i class="fa-solid fa-pause"></i></button>
+<button class="text-white/70 hover:text-white"><i class="fa-solid fa-forward-step"></i></button>
+</div>
+</div>
+</div>
+<!-- ============================================== -->
+<!-- S6B: FILE PREVIEW (Quick Look Style) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-[#F2F2F7] flex flex-col justify-between" id="view-S6B">
+<!-- Nav Bar -->
+<div class="px-4 py-2 border-b border-[#E5E5EA] bg-white flex items-center justify-between">
+<button class="text-base text-[#007AFF] font-normal flex items-center" onclick="switchScreen('S3')">
+<i class="fa-solid fa-chevron-left text-sm mr-1"></i> Back
+              </button>
+<div class="text-sm font-semibold text-black middle-truncate max-w-[170px]">SSH_Tunnel_Config_Spec.pdf</div>
+<button class="text-base text-[#007AFF]" onclick="alert('Opening iOS native Share Sheet for direct SFTP streaming export...');">
+<i class="fa-solid fa-arrow-up-from-bracket"></i>
+</button>
+</div>
+<!-- Preview Content Center -->
+<div class="flex-1 flex flex-col items-center justify-center p-6 text-center">
+<div class="w-28 h-36 bg-white rounded-xl shadow-md border border-[#E5E5EA] flex flex-col items-center justify-center p-4 mb-5">
+<i class="fa-solid fa-file-pdf text-5xl text-rose-500 mb-2"></i>
+<span class="text-[10px] text-gray-400 font-mono">PDF DOCUMENT</span>
+</div>
+<h3 class="text-base font-bold text-black mb-1">SSH_Tunnel_Config_Spec.pdf</h3>
+<p class="text-xs text-[#3C3C43]/60 mb-6">4.2 MB · Modified Sep 24, 2026</p>
+<div class="bg-white rounded-2xl p-4 shadow-xs border border-black/5 w-full max-w-xs text-left text-xs text-[#3C3C43]/70 space-y-1.5">
+<div class="flex justify-between"><span>Format:</span> <span class="font-semibold text-black">Adobe PDF (v1.7)</span></div>
+<div class="flex justify-between"><span>Origin:</span> <span class="font-semibold text-black">srv1.us-east</span></div>
+<div class="flex justify-between"><span>Permissions:</span> <span class="font-mono text-black">rw-r--r-- (0644)</span></div>
+</div>
+</div>
+<div class="p-4 bg-white border-t border-[#E5E5EA]">
+<button class="w-full py-3 bg-[#007AFF] text-white font-semibold rounded-xl" onclick="alert('Downloading to local temporary QuickLook cache...');">
+                Open in External App
+              </button>
+</div>
+</div>
+<!-- ============================================== -->
+<!-- S7: NEW FOLDER SHEET (Bottom Sheet) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-black/40 ios-blur flex flex-col justify-end" id="view-S7">
+<div class="bg-[#F2F2F7] rounded-t-[32px] p-5 pt-3 pb-10 shadow-2xl border-t border-white/20">
+<!-- Grabber -->
+<div class="w-9 h-1.5 bg-[#3C3C43]/20 rounded-full mx-auto mb-4"></div>
+<div class="flex items-center justify-between mb-4">
+<button class="text-base text-[#007AFF]" onclick="switchScreen('S3')">Cancel</button>
+<h3 class="text-base font-bold text-black">New Folder</h3>
+<button class="text-base font-bold text-[#007AFF]" onclick="alert('Folder created on SFTP remote host'); switchScreen('S3');">Create</button>
+</div>
+<div class="bg-white rounded-2xl p-3 shadow-xs border border-black/5 mb-3">
+<input autofocus="" class="w-full text-base text-black outline-none bg-transparent" id="newFolderNameInput" placeholder="Folder name" type="text" value="Production_Rollout_V2"/>
+</div>
+<p class="text-xs text-[#3C3C43]/60 text-center">Will be created inside /pool/media/2026_Keynotes_HQ</p>
+</div>
+</div>
+<!-- ============================================== -->
+<!-- S8: RENAME SHEET (Bottom Sheet) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-black/40 ios-blur flex flex-col justify-end" id="view-S8">
+<div class="bg-[#F2F2F7] rounded-t-[32px] p-5 pt-3 pb-10 shadow-2xl border-t border-white/20">
+<div class="w-9 h-1.5 bg-[#3C3C43]/20 rounded-full mx-auto mb-4"></div>
+<div class="flex items-center justify-between mb-4">
+<button class="text-base text-[#007AFF]" onclick="switchScreen('S3')">Cancel</button>
+<h3 class="text-base font-bold text-black">Rename</h3>
+<button class="text-base font-bold text-[#007AFF]" onclick="alert('Item renamed on remote machine'); switchScreen('S3');">Rename</button>
+</div>
+<div class="bg-white rounded-2xl p-3 shadow-xs border border-black/5 mb-3">
+<input class="w-full text-base text-black outline-none bg-transparent font-medium" type="text" value="Keynote_Executive_Full_HDR"/>
+</div>
+<p class="text-xs text-[#3C3C43]/60 text-center">Extension .mov preserved</p>
+</div>
+</div>
+<!-- ============================================== -->
+<!-- S9: MOVE PICKER (Pushed Folder Tree) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-[#F2F2F7] flex flex-col justify-between" id="view-S9">
+<div class="p-4 bg-white border-b border-[#E5E5EA]">
+<div class="flex items-center justify-between mb-2">
+<button class="text-base text-[#007AFF]" onclick="switchScreen('S3')">Cancel</button>
+<h3 class="text-base font-bold text-black truncate max-w-[200px]">Move “Keynote_Exec.mov”</h3>
+<span class="w-12"></span>
+</div>
+<div class="text-xs text-[#3C3C43]/60 font-mono">Destination: /pool/media/Archive</div>
+</div>
+<!-- Folder only list -->
+<div class="flex-1 overflow-y-auto p-4 phone-screen-scroll">
+<div class="text-xs font-semibold text-[#3C3C43]/60 uppercase px-2 mb-2">Choose Directory</div>
+<div class="bg-white rounded-2xl shadow-sm border border-black/5 divide-y divide-[#E5E5EA]">
+<div class="px-4 py-3 flex items-center justify-between active:bg-[#F2F2F7] cursor-pointer">
+<div class="flex items-center gap-3">
+<i class="fa-solid fa-folder text-[#007AFF] text-lg"></i>
+<span class="text-base font-semibold text-black">Archive / 2025</span>
+</div>
+<i class="fa-solid fa-chevron-right text-xs text-[#3C3C43]/30"></i>
+</div>
+<div class="px-4 py-3 flex items-center justify-between bg-blue-50/50 cursor-pointer">
+<div class="flex items-center gap-3">
+<i class="fa-solid fa-folder-open text-[#007AFF] text-lg"></i>
+<span class="text-base font-bold text-[#007AFF]">Archive / 2026 (Selected)</span>
+</div>
+<i class="fa-solid fa-check text-sm text-[#007AFF]"></i>
+</div>
+<div class="px-4 py-3 flex items-center justify-between active:bg-[#F2F2F7] cursor-pointer">
+<div class="flex items-center gap-3">
+<i class="fa-solid fa-folder text-[#007AFF] text-lg"></i>
+<span class="text-base font-semibold text-black">Drafts_Unpublished</span>
+</div>
+<i class="fa-solid fa-chevron-right text-xs text-[#3C3C43]/30"></i>
+</div>
+</div>
+<div class="mt-4 text-center">
+<button class="text-xs text-[#007AFF] font-mono hover:underline">Choose path manually</button>
+</div>
+</div>
+<div class="p-4 bg-white border-t border-[#E5E5EA]">
+<button class="w-full py-3.5 bg-[#007AFF] text-white font-semibold rounded-xl shadow-sm" onclick="alert('Moved file successfully'); switchScreen('S3');">
+                Move Here
+              </button>
+</div>
+</div>
+<!-- ============================================== -->
+<!-- S10: DELETE ALERT (Centered iOS Destructive Alert) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-black/40 ios-blur flex items-center justify-center p-6 z-50" id="view-S10">
+<div class="bg-white/95 rounded-[22px] w-72 text-center shadow-2xl overflow-hidden border border-black/10 backdrop-blur-xl">
+<div class="p-5 pb-4">
+<h3 class="text-base font-bold text-black mb-1">Delete “Keynote_Executive_Full_HDR.mov”?</h3>
+<p class="text-xs text-[#3C3C43]/80 leading-normal">
+                  Everything inside will be deleted on the remote SSH server. This cannot be undone.
+                </p>
+</div>
+<div class="border-t border-[#E5E5EA] divide-x divide-[#E5E5EA] flex">
+<button class="flex-1 py-3 text-base text-[#007AFF] font-normal hover:bg-gray-100" onclick="switchScreen('S3')">
+                  Cancel
+                </button>
+<button class="flex-1 py-3 text-base text-[#FF3B30] font-bold hover:bg-gray-100" onclick="alert('File permanently unlinked on SSH filesystem'); switchScreen('S3');">
+                  Delete
+                </button>
+</div>
+</div>
+</div>
+<!-- ============================================== -->
+<!-- S11: UPLOADS TAB (Tab 2 Active Queue) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-[#F2F2F7] flex flex-col" id="view-S11">
+<!-- Nav Bar -->
+<div class="px-5 pt-2 pb-2 flex items-center justify-between">
+<h1 class="text-[34px] font-bold text-black tracking-tight leading-tight">Uploads</h1>
+<button class="px-3 py-1.5 rounded-full bg-white border border-[#E5E5EA] text-xs font-semibold text-[#007AFF] flex items-center gap-1.5 shadow-xs" onclick="toggleUploadPause(this)">
+<i class="fa-solid fa-circle-pause" id="pauseAllIcon"></i>
+<span id="pauseAllText">Pause All</span>
+</button>
+</div>
+<!-- Uploads Queue List -->
+<div class="flex-1 overflow-y-auto px-4 pb-24 phone-screen-scroll space-y-3">
+<!-- Item 1: Uploading (45%) -->
+<div class="bg-white rounded-2xl p-4 shadow-sm border border-black/5">
+<div class="flex items-start justify-between mb-2">
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 rounded-xl bg-blue-50 text-[#007AFF] flex items-center justify-center text-sm">
+<i class="fa-solid fa-file-video"></i>
+</div>
+<div>
+<div class="text-sm font-semibold text-black middle-truncate">B-Roll_Drone_Footage_RAW.mov</div>
+<div class="text-xs text-[#007AFF] font-medium">Uploading · 45% (8.4 MB/s)</div>
+</div>
+</div>
+<button class="text-[#3C3C43]/40 hover:text-black">
+<i class="fa-solid fa-circle-xmark text-lg"></i>
+</button>
+</div>
+<!-- Thin iOS Blue Progress Bar -->
+<div class="w-full bg-[#E5E5EA] h-1.5 rounded-full overflow-hidden">
+<div class="bg-[#007AFF] h-full w-[45%] transition-all duration-300"></div>
+</div>
+</div>
+<!-- Item 2: Finishing... -->
+<div class="bg-white rounded-2xl p-4 shadow-sm border border-black/5">
+<div class="flex items-start justify-between mb-2">
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center text-sm">
+<i class="fa-solid fa-file-zipper"></i>
+</div>
+<div>
+<div class="text-sm font-semibold text-black middle-truncate">Dataset_Full_Oct2026.tar.gz</div>
+<div class="text-xs text-[#3C3C43]/70 font-medium">Finishing… (awaiting server confirm)</div>
+</div>
+</div>
+<div class="w-5 h-5 border-2 border-[#007AFF] border-t-transparent rounded-full animate-spin"></div>
+</div>
+<div class="w-full bg-[#E5E5EA] h-1.5 rounded-full overflow-hidden">
+<div class="bg-[#007AFF] h-full w-[99%]"></div>
+</div>
+</div>
+<!-- Item 3: Done -->
+<div class="bg-white rounded-2xl p-4 shadow-sm border border-black/5">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 rounded-xl bg-emerald-50 text-[#34C759] flex items-center justify-center text-sm">
+<i class="fa-solid fa-circle-check"></i>
+</div>
+<div>
+<div class="text-sm font-semibold text-black middle-truncate">Server_Manifest.json</div>
+<div class="text-xs text-[#34C759] font-medium">Done · 14.2 KB</div>
+</div>
+</div>
+<span class="text-xs text-[#3C3C43]/40 font-mono">Uploaded</span>
+</div>
+</div>
+<!-- Item 4: Failed with Retry -->
+<div class="bg-white rounded-2xl p-4 shadow-sm border border-black/5">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 rounded-xl bg-rose-50 text-[#FF3B30] flex items-center justify-center text-sm">
+<i class="fa-solid fa-triangle-exclamation"></i>
+</div>
+<div>
+<div class="text-sm font-semibold text-black middle-truncate">Database_Dump_2026.sql</div>
+<div class="text-xs text-[#FF3B30] font-medium">Failed: SSH write channel timed out</div>
+</div>
+</div>
+<button class="p-2 text-[#007AFF] hover:bg-blue-50 rounded-full" onclick="alert('Retrying upload from zero...');">
+<i class="fa-solid fa-arrows-rotate text-base"></i>
+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- ============================================== -->
+<!-- S12: SETTINGS TAB (Tab 3) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-[#F2F2F7] flex flex-col" id="view-S12">
+<div class="px-5 pt-2 pb-2">
+<h1 class="text-[34px] font-bold text-black tracking-tight leading-tight">Settings</h1>
+</div>
+<div class="flex-1 overflow-y-auto px-4 pb-24 phone-screen-scroll space-y-5">
+<!-- Account Section -->
+<div>
+<div class="px-2 py-1 text-xs font-semibold text-[#3C3C43]/60 uppercase tracking-wider">Account</div>
+<div class="bg-white rounded-2xl shadow-sm border border-black/5 divide-y divide-[#E5E5EA] overflow-hidden">
+<div class="px-4 py-3.5 flex items-center gap-3">
+<div class="w-12 h-12 rounded-full bg-blue-600 text-white font-bold text-lg flex items-center justify-center shadow-sm">
+                      A
+                    </div>
+<div class="truncate">
+<div class="text-base font-bold text-black">Alexander Vance</div>
+<div class="text-xs text-[#3C3C43]/70 truncate">alexander@stratofold.internal</div>
+</div>
+</div>
+<div class="px-4 py-3.5 flex items-center justify-between text-[#FF3B30] font-medium active:bg-[#F2F2F7] cursor-pointer" onclick="confirmSignOut()">
+<span>Sign Out</span>
+<i class="fa-solid fa-arrow-right-from-bracket text-sm"></i>
+</div>
+</div>
+</div>
+<!-- Storage & Connections Section -->
+<div>
+<div class="px-2 py-1 text-xs font-semibold text-[#3C3C43]/60 uppercase tracking-wider">Infrastructure</div>
+<div class="bg-white rounded-2xl shadow-sm border border-black/5 divide-y divide-[#E5E5EA] overflow-hidden">
+<div class="px-4 py-3.5 flex items-center justify-between active:bg-[#F2F2F7] cursor-pointer" onclick="switchScreen('S13')">
+<div class="flex items-center gap-3">
+<i class="fa-solid fa-server text-base text-[#007AFF]"></i>
+<span class="text-base text-black font-semibold">Connections</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-sm text-[#3C3C43]/50">3</span>
+<i class="fa-solid fa-chevron-right text-xs text-[#3C3C43]/30"></i>
+</div>
+</div>
+<div class="px-4 py-3.5 flex items-center justify-between active:bg-[#F2F2F7] cursor-pointer" onclick="switchScreen('S15')">
+<div class="flex items-center gap-3">
+<i class="fa-solid fa-folder-tree text-base text-[#007AFF]"></i>
+<span class="text-base text-black font-semibold">Virtual Directories</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-sm text-[#3C3C43]/50">4</span>
+<i class="fa-solid fa-chevron-right text-xs text-[#3C3C43]/30"></i>
+</div>
+</div>
+</div>
+</div>
+<!-- Information Card -->
+<div class="px-2 text-center text-xs text-[#3C3C43]/50 space-y-1">
+<p>Stratofold for iOS · Version 1.0.4 (Build 88)</p>
+<p>Files stream directly over encrypted SSH/SFTP</p>
+</div>
+</div>
+</div>
+<!-- ============================================== -->
+<!-- S13: CONNECTIONS LIST (Pushed from Settings) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-[#F2F2F7] flex flex-col" id="view-S13">
+<div class="px-4 pt-1 pb-1">
+<div class="flex items-center justify-between">
+<button class="text-base text-[#007AFF] font-normal" onclick="switchScreen('S12')">
+<i class="fa-solid fa-chevron-left text-sm mr-1"></i> Settings
+                </button>
+<button class="text-base text-[#007AFF]" onclick="switchScreen('S14')">
+<i class="fa-solid fa-plus text-lg"></i>
+</button>
+</div>
+<h1 class="text-[34px] font-bold text-black tracking-tight mt-0.5">Connections</h1>
+</div>
+<div class="flex-1 overflow-y-auto px-4 pb-24 phone-screen-scroll mt-2">
+<div class="bg-white rounded-2xl shadow-sm border border-black/5 divide-y divide-[#E5E5EA] overflow-hidden">
+<div class="px-4 py-3.5 flex items-center justify-between active:bg-[#F2F2F7] cursor-pointer" onclick="switchScreen('S14')">
+<div>
+<div class="text-base font-semibold text-black">srv1.us-east (Production)</div>
+<div class="text-xs text-[#3C3C43]/60 font-mono">root@srv1.cloud.net:22 · Private key</div>
+</div>
+<i class="fa-solid fa-chevron-right text-xs text-[#3C3C43]/30"></i>
+</div>
+<div class="px-4 py-3.5 flex items-center justify-between active:bg-[#F2F2F7] cursor-pointer" onclick="switchScreen('S14')">
+<div>
+<div class="text-base font-semibold text-black">nas-home.local</div>
+<div class="text-xs text-[#3C3C43]/60 font-mono">admin@192.168.1.120:22 · Password</div>
+</div>
+<i class="fa-solid fa-chevron-right text-xs text-[#3C3C43]/30"></i>
+</div>
+<div class="px-4 py-3.5 flex items-center justify-between active:bg-[#F2F2F7] cursor-pointer" onclick="switchScreen('S14')">
+<div>
+<div class="text-base font-semibold text-black">lab-node-04</div>
+<div class="text-xs text-[#3C3C43]/60 font-mono">research@10.0.4.88:2222 · Private key</div>
+</div>
+<i class="fa-solid fa-chevron-right text-xs text-[#3C3C43]/30"></i>
+</div>
+</div>
+</div>
+</div>
+<!-- ============================================== -->
+<!-- S14: CONNECTION FORM (Full-Height Sheet) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-[#F2F2F7] flex flex-col justify-between" id="view-S14">
+<div class="p-4 bg-white border-b border-[#E5E5EA] flex items-center justify-between">
+<button class="text-base text-[#007AFF]" onclick="switchScreen('S13')">Cancel</button>
+<h3 class="text-base font-bold text-black">Edit Connection</h3>
+<button class="text-base font-bold text-[#007AFF]" onclick="alert('Connection settings saved and SSH handshake validated'); switchScreen('S13');">Save</button>
+</div>
+<div class="flex-1 overflow-y-auto px-4 py-3 phone-screen-scroll space-y-4">
+<!-- Server Group -->
+<div>
+<div class="px-2 py-1 text-xs font-semibold text-[#3C3C43]/60 uppercase">Server</div>
+<div class="bg-white rounded-2xl shadow-sm border border-black/5 divide-y divide-[#E5E5EA] overflow-hidden">
+<div class="px-4 py-3 flex items-center">
+<span class="w-24 text-sm text-[#3C3C43]/80">Host</span>
+<input class="flex-1 text-sm text-black outline-none bg-transparent" type="text" value="srv1.cloud.net"/>
+</div>
+<div class="px-4 py-3 flex items-center">
+<span class="w-24 text-sm text-[#3C3C43]/80">Port</span>
+<input class="flex-1 text-sm text-black outline-none bg-transparent" type="number" value="22"/>
+</div>
+<div class="px-4 py-3 flex items-center">
+<span class="w-24 text-sm text-[#3C3C43]/80">Username</span>
+<input class="flex-1 text-sm text-black outline-none bg-transparent" type="text" value="root"/>
+</div>
+</div>
+</div>
+<!-- Authentication Segmented -->
+<div>
+<div class="px-2 py-1 text-xs font-semibold text-[#3C3C43]/60 uppercase">Authentication</div>
+<div class="bg-white rounded-2xl p-3 shadow-sm border border-black/5 space-y-3">
+<div class="flex bg-[#E5E5EA] p-0.5 rounded-lg text-xs font-medium">
+<button class="flex-1 py-1.5 rounded-md text-[#3C3C43]/70">Password</button>
+<button class="flex-1 py-1.5 rounded-md bg-white text-black font-semibold shadow-xs">Private Key</button>
+</div>
+<div>
+<label class="text-xs text-[#3C3C43]/60 block mb-1">Private Key (OpenSSH / PEM)</label>
+<textarea class="w-full text-xs font-mono bg-gray-50 border border-gray-200 rounded-lg p-2 outline-none" rows="2">•••••••• (Stored Secure Key)</textarea>
+<span class="text-[11px] text-[#3C3C43]/50">Leave empty to keep the stored secret.</span>
+</div>
+</div>
+</div>
+<!-- Defaults -->
+<div>
+<div class="px-2 py-1 text-xs font-semibold text-[#3C3C43]/60 uppercase">Defaults</div>
+<div class="bg-white rounded-2xl p-3 shadow-sm border border-black/5">
+<span class="text-xs text-[#3C3C43]/60 block mb-1">Remote Directory</span>
+<input class="w-full text-sm font-mono text-black outline-none" type="text" value="/var/backups/"/>
+<span class="text-[11px] text-[#3C3C43]/50 block mt-1">Default root path offered when creating a vdir.</span>
+</div>
+</div>
+<!-- Delete Connection Row -->
+<div class="bg-white rounded-2xl shadow-sm border border-black/5 overflow-hidden">
+<button class="w-full px-4 py-3 text-left text-sm font-semibold text-[#FF3B30] hover:bg-gray-50" onclick="alert('Connection deleted'); switchScreen('S13');">
+                  Delete Connection
+                </button>
+</div>
+</div>
+</div>
+<!-- ============================================== -->
+<!-- S15: VDIRS LIST (Pushed from Settings) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-[#F2F2F7] flex flex-col" id="view-S15">
+<div class="px-4 pt-1 pb-1">
+<div class="flex items-center justify-between">
+<button class="text-base text-[#007AFF] font-normal" onclick="switchScreen('S12')">
+<i class="fa-solid fa-chevron-left text-sm mr-1"></i> Settings
+                </button>
+<button class="text-base text-[#007AFF]" onclick="switchScreen('S16')">
+<i class="fa-solid fa-plus text-lg"></i>
+</button>
+</div>
+<h1 class="text-[34px] font-bold text-black tracking-tight mt-0.5">Virtual Dirs</h1>
+</div>
+<div class="flex-1 overflow-y-auto px-4 pb-24 phone-screen-scroll mt-2">
+<div class="bg-white rounded-2xl shadow-sm border border-black/5 divide-y divide-[#E5E5EA] overflow-hidden">
+<div class="px-4 py-3.5 flex items-center justify-between active:bg-[#F2F2F7] cursor-pointer" onclick="switchScreen('S16')">
+<div class="flex items-center gap-3">
+<i class="fa-solid fa-folder text-[#007AFF] text-lg"></i>
+<div>
+<div class="text-base font-semibold text-black">Production Backups</div>
+<div class="text-xs text-[#3C3C43]/60 font-mono">srv1.us-east · /var/backups</div>
+</div>
+</div>
+<i class="fa-solid fa-chevron-right text-xs text-[#3C3C43]/30"></i>
+</div>
+<div class="px-4 py-3.5 flex items-center justify-between active:bg-[#F2F2F7] cursor-pointer" onclick="switchScreen('S16')">
+<div class="flex items-center gap-3">
+<i class="fa-solid fa-folder text-[#007AFF] text-lg"></i>
+<div>
+<div class="flex items-center gap-2">
+<span class="text-base font-semibold text-black">Media Vault</span>
+<span class="bg-[#34C759]/15 text-[#34C759] text-[10px] font-bold px-1.5 py-0.5 rounded-full">Public</span>
+</div>
+<div class="text-xs text-[#3C3C43]/60 font-mono">nas-home.local · /pool/media</div>
+</div>
+</div>
+<i class="fa-solid fa-chevron-right text-xs text-[#3C3C43]/30"></i>
+</div>
+</div>
+</div>
+</div>
+<!-- ============================================== -->
+<!-- S16: VDIR FORM (Edit Vdir & Access) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-[#F2F2F7] flex flex-col justify-between" id="view-S16">
+<div class="p-4 bg-white border-b border-[#E5E5EA] flex items-center justify-between">
+<button class="text-base text-[#007AFF]" onclick="switchScreen('S15')">Cancel</button>
+<h3 class="text-base font-bold text-black">Edit Vdir</h3>
+<button class="text-base font-bold text-[#007AFF]" onclick="alert('Virtual Directory updated'); switchScreen('S15');">Save</button>
+</div>
+<div class="flex-1 overflow-y-auto px-4 py-3 phone-screen-scroll space-y-4">
+<!-- Properties -->
+<div>
+<div class="px-2 py-1 text-xs font-semibold text-[#3C3C43]/60 uppercase">Virtual Directory Details</div>
+<div class="bg-white rounded-2xl shadow-sm border border-black/5 divide-y divide-[#E5E5EA] overflow-hidden">
+<div class="px-4 py-3 flex items-center">
+<span class="w-24 text-sm text-[#3C3C43]/80">Name</span>
+<input class="flex-1 text-sm text-black outline-none bg-transparent font-medium" type="text" value="Media Vault"/>
+</div>
+<div class="px-4 py-3 flex items-center">
+<span class="w-24 text-sm text-[#3C3C43]/80">Root Path</span>
+<input class="flex-1 text-sm font-mono text-black outline-none bg-transparent" type="text" value="/pool/media/"/>
+</div>
+<div class="px-4 py-3 flex items-center justify-between">
+<span class="text-sm text-[#3C3C43]/80">Connection</span>
+<span class="text-sm text-black font-semibold">nas-home.local</span>
+</div>
+</div>
+</div>
+<!-- Public iOS Switch -->
+<div class="bg-white rounded-2xl p-4 shadow-sm border border-black/5">
+<div class="flex items-center justify-between mb-1">
+<span class="text-base font-semibold text-black">Public Access</span>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#34C759]"></div>
+</label>
+</div>
+<p class="text-xs text-[#3C3C43]/60 leading-normal">
+                  Anyone with the link can browse and download. Never allows writing or modifying.
+                </p>
+</div>
+<!-- Sharing Row -->
+<div class="bg-white rounded-2xl shadow-sm border border-black/5 overflow-hidden">
+<div class="px-4 py-3.5 flex items-center justify-between active:bg-[#F2F2F7] cursor-pointer" onclick="switchScreen('S17')">
+<div class="flex items-center gap-3">
+<i class="fa-solid fa-user-group text-[#007AFF]"></i>
+<span class="text-base font-semibold text-black">Sharing &amp; Roles</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-xs bg-blue-100 text-[#007AFF] px-2 py-0.5 rounded-full font-bold">2 people</span>
+<i class="fa-solid fa-chevron-right text-xs text-[#3C3C43]/30"></i>
+</div>
+</div>
+</div>
+<!-- Delete Vdir -->
+<div class="bg-white rounded-2xl shadow-sm border border-black/5 overflow-hidden">
+<button class="w-full px-4 py-3 text-left text-sm font-semibold text-[#FF3B30] hover:bg-gray-50" onclick="alert('Virtual directory unmounted'); switchScreen('S15');">
+                  Delete Virtual Directory
+                </button>
+</div>
+</div>
+</div>
+<!-- ============================================== -->
+<!-- S17: SHARING (Access Control & Roles) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-[#F2F2F7] flex flex-col justify-between" id="view-S17">
+<div class="px-4 pt-1 pb-1 bg-white border-b border-[#E5E5EA]">
+<div class="flex items-center justify-between">
+<button class="text-base text-[#007AFF] font-normal" onclick="switchScreen('S16')">
+<i class="fa-solid fa-chevron-left text-sm mr-1"></i> Vdir
+                </button>
+<div class="text-xs font-bold text-gray-400">Media Vault</div>
+</div>
+<h1 class="text-[30px] font-bold text-black tracking-tight mt-0.5">Sharing</h1>
+</div>
+<div class="flex-1 overflow-y-auto px-4 py-3 phone-screen-scroll space-y-4">
+<!-- Top Card: Invite by email -->
+<div class="bg-white rounded-2xl p-4 shadow-sm border border-black/5 space-y-3">
+<h3 class="text-xs font-bold text-[#3C3C43]/60 uppercase tracking-wider">Invite Collaborator</h3>
+<input class="w-full px-3 py-2.5 bg-gray-50 border border-[#E5E5EA] rounded-xl text-sm outline-none" placeholder="colleague@domain.com" type="email"/>
+<!-- Role Radio Rows -->
+<div class="space-y-2 text-xs">
+<label class="flex items-start gap-2.5 p-2 rounded-xl bg-gray-50 cursor-pointer">
+<input checked="" class="mt-0.5 text-[#007AFF]" name="inviteRole" type="radio"/>
+<div>
+<div class="font-bold text-black">Viewer</div>
+<div class="text-[#3C3C43]/60">Browse and download only</div>
+</div>
+</label>
+<label class="flex items-start gap-2.5 p-2 rounded-xl bg-gray-50 cursor-pointer">
+<input class="mt-0.5 text-[#007AFF]" name="inviteRole" type="radio"/>
+<div>
+<div class="font-bold text-black">Editor</div>
+<div class="text-[#3C3C43]/60">Also upload, rename, move, and delete</div>
+</div>
+</label>
+</div>
+<button class="w-full py-2.5 bg-[#007AFF] text-white font-semibold text-xs rounded-xl shadow-xs" onclick="alert('Access grant issued for user');">
+                  Grant Access
+                </button>
+</div>
+<!-- People with access list -->
+<div>
+<div class="px-2 py-1 text-xs font-semibold text-[#3C3C43]/60 uppercase tracking-wider">People with access</div>
+<div class="bg-white rounded-2xl shadow-sm border border-black/5 divide-y divide-[#E5E5EA] overflow-hidden">
+<div class="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-gray-50" onclick="alert('Action sheet: [Make Viewer] [Make Editor] [Revoke Access]');">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-600">
+<i class="fa-solid fa-user text-xs"></i>
+</div>
+<div>
+<div class="text-sm font-semibold text-black">user-a1b2c3d</div>
+<div class="text-xs text-[#3C3C43]/60">Editor</div>
+</div>
+</div>
+<i class="fa-solid fa-ellipsis text-gray-400"></i>
+</div>
+<div class="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-gray-50" onclick="alert('Action sheet: [Make Viewer] [Make Editor] [Revoke Access]');">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-600">
+<i class="fa-solid fa-user text-xs"></i>
+</div>
+<div>
+<div class="text-sm font-semibold text-black">user-f8902ba</div>
+<div class="text-xs text-[#3C3C43]/60">Viewer</div>
+</div>
+</div>
+<i class="fa-solid fa-ellipsis text-gray-400"></i>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- ============================================== -->
+<!-- S18: PAGE NOT FOUND (Error State 1) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-[#F2F2F7] flex flex-col items-center justify-center p-6 text-center" id="view-S18">
+<div class="w-20 h-20 rounded-3xl bg-blue-100 text-[#007AFF] flex items-center justify-center text-3xl mb-4">
+<i class="fa-solid fa-file-circle-question"></i>
+</div>
+<h2 class="text-2xl font-bold text-black mb-2">Page Not Found</h2>
+<p class="text-sm text-[#3C3C43]/70 mb-6 max-w-xs">
+              The remote file path or virtual directory you requested was moved or does not exist.
+            </p>
+<button class="px-6 py-3 bg-[#007AFF] text-white font-semibold rounded-xl shadow-sm active:scale-95" onclick="switchScreen('S2')">
+              Back to Your Files
+            </button>
+</div>
+<!-- ============================================== -->
+<!-- S-ERR: PERMISSION DENIED (Error State 2) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-[#F2F2F7] flex flex-col items-center justify-center p-6 text-center" id="view-S_ERR_PERM">
+<div class="w-20 h-20 rounded-3xl bg-rose-100 text-[#FF3B30] flex items-center justify-center text-3xl mb-4">
+<i class="fa-solid fa-lock"></i>
+</div>
+<h2 class="text-xl font-bold text-black mb-2">Permission Denied</h2>
+<p class="text-sm text-[#3C3C43]/70 mb-4 max-w-xs">
+              You don’t have permission for this action. Contact the virtual directory owner to upgrade from Viewer to Editor.
+            </p>
+<button class="text-sm font-medium text-[#007AFF]" onclick="switchScreen('S3')">
+              Return to Folder
+            </button>
+</div>
+<!-- ============================================== -->
+<!-- S-ERR: TEMPORARILY UNAVAILABLE (Error State 3) -->
+<!-- ============================================== -->
+<div class="screen-view h-full bg-[#F2F2F7] flex flex-col items-center justify-center p-6 text-center" id="view-S_ERR_UNAVAIL">
+<div class="w-20 h-20 rounded-3xl bg-amber-100 text-amber-600 flex items-center justify-center text-3xl mb-4">
+<i class="fa-solid fa-wifi"></i>
+</div>
+<h2 class="text-xl font-bold text-black mb-2">Temporarily Unavailable</h2>
+<p class="text-sm text-[#3C3C43]/70 mb-6 max-w-xs">
+              SSH socket handshake timed out on srv1.cloud.net:22. The remote server may be restarting.
+            </p>
+<button class="px-6 py-3 bg-[#007AFF] text-white font-semibold rounded-xl shadow-sm active:scale-95 flex items-center gap-2" onclick="alert('Re-establishing SFTP channel...'); switchScreen('S3');">
+<i class="fa-solid fa-arrow-rotate-right text-xs"></i>
+<span>Retry Connection</span>
+</button>
+</div>
+</div>
+<!-- ============================================== -->
+<!-- Floating Active Uploads Pill (when on other tabs) -->
+<!-- ============================================== -->
+<div class="absolute bottom-24 right-4 z-40 bg-black/80 text-white rounded-full px-3 py-1.5 flex items-center gap-2 shadow-lg backdrop-blur-md cursor-pointer border border-white/10 text-xs hover:scale-105 active:scale-95 transition" id="floatingUploadPill" onclick="switchScreen('S11')">
+<div class="w-4 h-4 rounded-full border-2 border-[#007AFF] border-t-transparent animate-spin"></div>
+<span class="font-medium">1 Uploading (45%)</span>
+</div>
+<!-- ============================================== -->
+<!-- Translucent Blurred Native Bottom Tab Bar -->
+<!-- ============================================== -->
+<nav class="absolute bottom-0 left-0 right-0 h-20 bg-white/80 ios-blur border-t border-[#E5E5EA] flex items-start justify-around pt-2 px-3 z-30 select-none" id="iosTabBar">
+<!-- Tab 1: Files -->
+<button class="flex flex-col items-center text-[#007AFF] w-20" id="tabFilesBtn" onclick="switchScreen('S2')">
+<i class="fa-solid fa-folder text-xl mb-0.5"></i>
+<span class="text-[10px] font-semibold">Files</span>
+</button>
+<!-- Tab 2: Uploads (with numeric active badge) -->
+<button class="flex flex-col items-center text-[#3C3C43]/60 hover:text-black w-20 relative" id="tabUploadsBtn" onclick="switchScreen('S11')">
+<div class="relative">
+<i class="fa-solid fa-tray text-xl mb-0.5"></i>
+<!-- Active badge -->
+<span class="absolute -top-1 -right-2 bg-[#007AFF] text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                2
+              </span>
+</div>
+<span class="text-[10px] font-medium">Uploads</span>
+</button>
+<!-- Tab 3: Settings -->
+<button class="flex flex-col items-center text-[#3C3C43]/60 hover:text-black w-20" id="tabSettingsBtn" onclick="switchScreen('S12')">
+<i class="fa-solid fa-gear text-xl mb-0.5"></i>
+<span class="text-[10px] font-medium">Settings</span>
+</button>
+</nav>
+<!-- Native Home Indicator Bar -->
+<div class="home-indicator"></div>
+</div>
+</div>
+</div>
+<script>
+    // State Tracker
+    let currentRole = 'owner'; // 'owner' or 'viewer'
+    let currentScreenId = 'S3';
+
+    const screenMeta = {
+      'S1': { badge: 'S1 — LOGIN', title: 'Login & Authentication', desc: 'Full-screen authentication gateway. Centered cloud geometric glyph, inset-grouped credential card with eye toggle, error banners, and keyboard safety.' },
+      'S2': { badge: 'S2 — FILES ROOT', title: 'Files: Locations', desc: 'Tab 1 root. Large title Files, Inset-grouped "My vdirs" with Public pills, "Shared with me", and Manage vdirs shortcut.' },
+      'S3': { badge: 'S3 — BROWSE (LIST)', title: 'Folder Browse (List Mode)', desc: 'Hierarchical SFTP file exploration. Folder-first sorting, middle-truncated filenames, live file metadata, and quick action bar (New Folder, Upload, Sort, Grid toggle).' },
+      'S4': { badge: 'S4 — BROWSE (GRID)', title: 'Folder Browse (Grid Mode)', desc: 'Spacious 3-column grid card view for media assets and touch browsing. Center icon, 2-line clean name clamping.' },
+      'S5': { badge: 'S5 — CONTEXT MENU', title: 'Context Menu (Long-press)', desc: 'iOS blur context overlay with focused floating item. Role-gated actions: Viewers see Open & Download; Owners see Rename, Move, Delete.' },
+      'S6_VIDEO': { badge: 'S6 — VIDEO PLAYER', title: 'Media Player (Video Stream)', desc: 'Immersive black player. Live HTTP streaming over SFTP, 15s skip, AirPlay integration, and auto-hiding controls.' },
+      'S6_AUDIO': { badge: 'S6 — AUDIO PLAYER', title: 'Media Player (Audio Stream)', desc: 'Full-bleed album art glyph, live scrubber, 24-bit lossless streaming indicator.' },
+      'S6B': { badge: 'S6b — FILE PREVIEW', title: 'Quick Look Preview', desc: 'File preview with format metadata, size, modification date, and iOS system share sheet export.' },
+      'S7': { badge: 'S7 — NEW FOLDER', title: 'New Folder Bottom Sheet', desc: 'Native Cupertino bottom sheet with grabber, auto-focused name input, and Cancel/Create controls.' },
+      'S8': { badge: 'S8 — RENAME', title: 'Rename Item Bottom Sheet', desc: 'Cupertino sheet prefilled with item name, keeping file extension safe.' },
+      'S9': { badge: 'S9 — MOVE PICKER', title: 'Move Picker (Folder Tree)', desc: 'Folder-only navigation picker with destination validation and "Move Here" CTA.' },
+      'S10': { badge: 'S10 — DELETE ALERT', title: 'Destructive Delete Alert', desc: 'Centered iOS alert modal with bold red destructive confirmation.' },
+      'S11': { badge: 'S11 — UPLOADS TAB', title: 'Uploads Tab (Active Queue)', desc: 'Tab 2. Queue manager with Pause/Resume All, progress bars, cancellation, and retry triggers.' },
+      'S12': { badge: 'S12 — SETTINGS TAB', title: 'Settings Tab', desc: 'Tab 3. User account details, global sign-out, infrastructure links (Connections, Virtual Directories).' },
+      'S13': { badge: 'S13 — CONNECTIONS', title: 'Connections List', desc: 'Saved SSH/SFTP connection endpoints, credentials badges, and plus action.' },
+      'S14': { badge: 'S14 — CONNECTION FORM', title: 'Connection Form (Full Sheet)', desc: 'Full-height sheet with Host/Port/User, Password vs Private Key toggle, and host key pinning.' },
+      'S15': { badge: 'S15 — VDIRS LIST', title: 'Virtual Directories List', desc: 'Active virtual directory mounts with public pill indicators and remote paths.' },
+      'S16': { badge: 'S16 — VDIR FORM', title: 'Virtual Directory Form', desc: 'Path mounting, connection picker, public toggle switch, and sharing shortcut.' },
+      'S17': { badge: 'S17 — SHARING & ROLES', title: 'Sharing & Access Control', desc: 'Email invitation with role selection (Viewer vs Editor) and permission management.' },
+      'S18': { badge: 'S18 — NOT FOUND', title: 'Page Not Found State', desc: 'doc.questionmark glyph error screen with direct return button.' },
+      'S_ERR_PERM': { badge: 'S-ERR — PERMISSION', title: 'Permission Denied State', desc: 'lock.fill glyph warning shown when viewers attempt unauthorized write tasks.' },
+      'S_ERR_UNAVAIL': { badge: 'S-ERR — UNAVAILABLE', title: 'Temporarily Unavailable', desc: 'wifi.slash glyph with blue Retry button for connection socket errors.' }
+    };
+
+    function switchScreen(screenId) {
+      if (!screenId) return;
+      currentScreenId = screenId;
+
+      // Hide all screen view containers
+      document.querySelectorAll('.screen-view').forEach(view => {
+        view.classList.remove('active');
+        view.style.display = 'none';
+      });
+
+      // Show selected screen container
+      const target = document.getElementById('view-' + screenId);
+      if (target) {
+        target.classList.add('active');
+        target.style.display = 'flex';
+      }
+
+      // Synchronize dropdown selectors (supporting both screenSelect and screenSelector)
+      const selectors = [document.getElementById('screenSelect'), document.getElementById('screenSelector')];
+      selectors.forEach(sel => {
+        if (sel && sel.value !== screenId) {
+          sel.value = screenId;
+        }
+      });
+
+      // Update Spec Card Metadata
+      const meta = screenMeta[screenId] || { badge: screenId, title: 'Screen View', desc: '' };
+      const badgeElem = document.getElementById('badgeSpecId');
+      const titleElem = document.getElementById('specTitle');
+      const descElem = document.getElementById('specDesc');
+      if (badgeElem) badgeElem.textContent = meta.badge;
+      if (titleElem) titleElem.textContent = meta.title;
+      if (descElem) descElem.textContent = meta.desc;
+
+      // Handle Tab Bar & Floating Pill Visibility
+      const tabBar = document.getElementById('iosTabBar');
+      const floatPill = document.getElementById('floatingUploadPill');
+
+      // Screens where the tab bar and floating pill should be hidden (fullscreen sheets, alerts, immersive modes)
+      const hideTabBarScreens = ['S1', 'S6_VIDEO', 'S6_AUDIO', 'S10', 'S14', 'S16', 'S18'];
+      if (tabBar) {
+        if (hideTabBarScreens.includes(screenId)) {
+          tabBar.style.display = 'none';
+        } else {
+          tabBar.style.display = 'flex';
+        }
+      }
+
+      if (floatPill) {
+        if (['S1', 'S6_VIDEO', 'S6_AUDIO', 'S10', 'S11', 'S14', 'S16', 'S18'].includes(screenId)) {
+          floatPill.style.display = 'none';
+        } else {
+          floatPill.style.display = 'flex';
+        }
+      }
+
+      // Update Tab Bar Active State
+      const tabFiles = document.getElementById('tabFilesBtn');
+      const tabUploads = document.getElementById('tabUploadsBtn');
+      const tabSettings = document.getElementById('tabSettingsBtn');
+
+      if (tabFiles && tabUploads && tabSettings) {
+        tabFiles.className = 'flex flex-col items-center text-[#3C3C43]/60 hover:text-black w-20';
+        tabUploads.className = 'flex flex-col items-center text-[#3C3C43]/60 hover:text-black w-20 relative';
+        tabSettings.className = 'flex flex-col items-center text-[#3C3C43]/60 hover:text-black w-20';
+
+        if (['S2', 'S3', 'S4', 'S5', 'S6B', 'S7', 'S8', 'S9'].includes(screenId)) {
+          tabFiles.className = 'flex flex-col items-center text-[#007AFF] w-20 font-semibold';
+        } else if (screenId === 'S11') {
+          tabUploads.className = 'flex flex-col items-center text-[#007AFF] w-20 relative font-semibold';
+        } else if (['S12', 'S13', 'S15', 'S17'].includes(screenId)) {
+          tabSettings.className = 'flex flex-col items-center text-[#007AFF] w-20 font-semibold';
+        }
+      }
+    }
+
+    function setRole(role) {
+      currentRole = role;
+      const ownerBtn = document.getElementById('roleOwnerBtn');
+      const viewerBtn = document.getElementById('roleViewerBtn');
+      const badgeRole = document.getElementById('badgeRole');
+      const writeActions = document.getElementById('writeActionsToolbar');
+      const contextOwnerActions = document.getElementById('contextOwnerOnlyActions');
+
+      if (role === 'owner') {
+        if (ownerBtn) ownerBtn.className = 'px-2.5 py-1 rounded-md bg-blue-600 text-white font-medium';
+        if (viewerBtn) viewerBtn.className = 'px-2.5 py-1 rounded-md text-gray-400 hover:text-white';
+        if (badgeRole) {
+          badgeRole.textContent = 'Owner View';
+          badgeRole.className = 'text-xs font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400';
+        }
+        if (writeActions) writeActions.style.display = 'flex';
+        if (contextOwnerActions) contextOwnerActions.style.display = 'block';
+      } else {
+        if (viewerBtn) viewerBtn.className = 'px-2.5 py-1 rounded-md bg-blue-600 text-white font-medium';
+        if (ownerBtn) ownerBtn.className = 'px-2.5 py-1 rounded-md text-gray-400 hover:text-white';
+        if (badgeRole) {
+          badgeRole.textContent = 'Viewer / Public (Write Controls Hidden)';
+          badgeRole.className = 'text-xs font-semibold px-2 py-0.5 rounded bg-amber-500/10 text-amber-400';
+        }
+        if (writeActions) writeActions.style.display = 'none';
+        if (contextOwnerActions) contextOwnerActions.style.display = 'none';
+      }
+    }
+
+    function togglePasswordVisibility() {
+      const input = document.getElementById('loginPassInput');
+      const icon = document.getElementById('eyeIcon');
+      if (input && icon) {
+        if (input.type === 'password') {
+          input.type = 'text';
+          icon.className = 'fa-regular fa-eye-slash text-sm text-black';
+        } else {
+          input.type = 'password';
+          icon.className = 'fa-regular fa-eye text-sm';
+        }
+      }
+    }
+
+    function handleLoginClick(btn) {
+      const txt = document.getElementById('loginBtnText');
+      if (txt) txt.textContent = 'Signing In…';
+      btn.disabled = true;
+      btn.classList.add('opacity-75');
+      setTimeout(() => {
+        if (txt) txt.textContent = 'Sign In';
+        btn.disabled = false;
+        btn.classList.remove('opacity-75');
+        switchScreen('S2');
+      }, 600);
+    }
+
+    function toggleUploadPause(btn) {
+      const txt = document.getElementById('pauseAllText');
+      const icon = document.getElementById('pauseAllIcon');
+      if (txt && icon) {
+        if (txt.textContent === 'Pause All') {
+          txt.textContent = 'Resume All';
+          icon.className = 'fa-solid fa-circle-play';
+        } else {
+          txt.textContent = 'Pause All';
+          icon.className = 'fa-solid fa-circle-pause';
+        }
+      }
+    }
+
+    function confirmSignOut() {
+      if (confirm("Sign out? You'll be signed out on all devices.")) {
+        switchScreen('S1');
+      }
+    }
+
+    // Attach listeners reliably on DOMContentLoaded
+    document.addEventListener('DOMContentLoaded', () => {
+      const screenSelect = document.getElementById('screenSelect') || document.getElementById('screenSelector');
+      if (screenSelect) {
+        screenSelect.addEventListener('change', (e) => {
+          switchScreen(e.target.value);
+        });
+      }
+      // Initialize view with currently selected dropdown value or S3
+      const initialScreen = (screenSelect && screenSelect.value) ? screenSelect.value : 'S3';
+      switchScreen(initialScreen);
+    });
+  </script>
+</body></html>
