@@ -73,7 +73,7 @@ export function MovePickerPage() {
   const effectiveDest = manual ? manualPath.trim() : dest;
 
   return (
-    <div className="flex min-h-dvh flex-col">
+    <div className="flex min-h-dvh flex-col pb-24 md:pb-0">
       <div className="border-b border-ios-separator bg-ios-card p-4">
         <div className="flex items-center justify-between">
           <button

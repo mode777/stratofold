@@ -1,7 +1,8 @@
 // Browse view (web-ui spec, design D4/D9): one vdir's directory listing
-// at the splat path — iOS nav bar with back control and breadcrumb
-// path, a compact toolbar (sort, list/grid toggle, writer-only New /
-// Upload), virtualized list/grid entries, a long-press context menu,
+// at the splat path — iOS nav bar with back control, folder title, and
+// breadcrumb path plus the writer-only New / Upload actions (design D3
+// of fix-web-ui-and-session-lifetime), a compact view toolbar (sort,
+// list/grid), virtualized list/grid entries, a long-press context menu,
 // and the file-operation overlays. The deterministic error classes
 // render as distinct states with a retry action on 503.
 
@@ -183,11 +184,42 @@ export function BrowsePage() {
         <h1 className="mt-0.5 text-[30px] font-bold leading-tight tracking-tight text-ios-label">
           {currentName}
         </h1>
+        {/* Write actions live in the folder header (design D3) so the
+            compact toolbar below stays view-controls-only and fits at
+            mobile widths. */}
+        {canWrite && (
+          <div className="mt-2 flex items-center gap-2" data-testid="header-actions">
+            <button
+              type="button"
+              data-testid="new-folder"
+              onClick={() => setOp({ kind: "mkdir" })}
+              className="flex items-center gap-1 rounded-full border border-ios-separator bg-ios-card px-2.5 py-1.5 font-medium text-ios-label shadow-sm"
+            >
+              <FolderPlusIcon className="text-ios-blue" /> New
+            </button>
+            <button
+              type="button"
+              data-testid="upload-button"
+              onClick={() => uploadInput.current?.click()}
+              className="flex items-center gap-1 rounded-full bg-ios-blue px-3 py-1.5 font-medium text-white shadow-sm"
+            >
+              <UploadIcon /> Upload
+            </button>
+            <input
+              ref={uploadInput}
+              type="file"
+              multiple
+              data-testid="upload-input"
+              onChange={onUpload}
+              className="hidden"
+            />
+          </div>
+        )}
         <Breadcrumbs vdirId={vdirId ?? ""} vdirName={vdirName} path={path} />
       </div>
 
       <div
-        className="flex items-center justify-between gap-2 border-y border-ios-separator bg-ios-bg px-4 py-2 text-xs"
+        className="flex items-center gap-2 border-y border-ios-separator bg-ios-bg px-4 py-2 text-xs"
         data-testid="toolbar"
       >
         <div className="flex items-center gap-2">
@@ -238,35 +270,6 @@ export function BrowsePage() {
             </button>
           </span>
         </div>
-
-        {canWrite && (
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              data-testid="new-folder"
-              onClick={() => setOp({ kind: "mkdir" })}
-              className="flex items-center gap-1 rounded-full border border-ios-separator bg-ios-card px-2.5 py-1.5 font-medium text-ios-label shadow-sm"
-            >
-              <FolderPlusIcon className="text-ios-blue" /> New
-            </button>
-            <button
-              type="button"
-              data-testid="upload-button"
-              onClick={() => uploadInput.current?.click()}
-              className="flex items-center gap-1 rounded-full bg-ios-blue px-3 py-1.5 font-medium text-white shadow-sm"
-            >
-              <UploadIcon /> Upload
-            </button>
-            <input
-              ref={uploadInput}
-              type="file"
-              multiple
-              data-testid="upload-input"
-              onChange={onUpload}
-              className="hidden"
-            />
-          </div>
-        )}
       </div>
 
       <div className="min-h-0 flex-1">

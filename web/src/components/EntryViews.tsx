@@ -178,6 +178,11 @@ export function EntryList({
           );
         })}
       </div>
+      {/* Trailing spacer (design D4): the scroll area runs to the
+          viewport bottom beneath the translucent tab bar; the spacer
+          lets the last entry scroll fully above it. It sits outside
+          the measured card, so the virtualizer is unaffected. */}
+      <div aria-hidden="true" className="h-24 pb-safe" />
     </div>
   );
 }
@@ -291,6 +296,8 @@ export function EntryGrid({
           );
         })}
       </div>
+      {/* Trailing spacer, same purpose as in EntryList (design D4). */}
+      <div aria-hidden="true" className="h-24 pb-safe" />
     </div>
   );
 }

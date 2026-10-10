@@ -38,9 +38,12 @@ see `docs/architecture.md`; finer details still follow.
   with `--http`), SQLite under `./pb_data` (override with `--dir`).
   Superuser: `go run ./cmd/stratofold superuser upsert EMAIL PASS`.
   Auth: `POST /api/sf/auth` returns the PocketBase token and sets the
-  HttpOnly `sf_session` cookie (SameSite=Lax, `Secure` on HTTPS);
-  `DELETE /api/sf/auth` clears it (all-devices logout — token-key
-  rotation, design D3). Custom routes live only under `/api/sf/`
+  HttpOnly `sf_session` cookie (SameSite=Lax, `Secure` on HTTPS) —
+  persistent, with MaxAge = the users collection's token duration
+  (migration `1770000004` pins it to the PocketBase maximum ≈ 3 y;
+  browsers cap cookie life at 400 days); `DELETE /api/sf/auth` clears
+  it (all-devices logout — token-key rotation, design D3). Custom
+  routes live only under `/api/sf/`
   (PocketBase owns `/api/files/*`); streaming routes clear deadlines
   via `appserver.ClearStreamDeadlines`.
 - **Connections & vdirs** (roadmap change 3): both are PocketBase
@@ -171,7 +174,11 @@ see `docs/architecture.md`; finer details still follow.
   gated by the signed-in user's effective role on the vdir (owner or
   `editor`) derived client-side in `web/src/lib/useVdirRole.ts` from the
   vdir's `owner` field or the user's own `vdir_shares` record — the
-  server still enforces independently. Entry actions live in the
+  server still enforces independently. New-folder and upload live in
+  the browse folder header (above the breadcrumbs), the compact
+  toolbar stays view-controls-only, and the listing scrolls beneath
+  the mobile tab bar (destinations own their bottom clearance).
+  Entry actions live in the
   long-press / ellipsis context menu; new-folder and rename are bottom
   sheets, delete is a destructive alert, and move is the pushed
   `/v/:vdirId/move` picker. Mutations reuse the

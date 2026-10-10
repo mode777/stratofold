@@ -14,7 +14,7 @@ export function VdirsPage() {
   const own = vdirs.filter((v) => v.owner === userId);
 
   return (
-    <div data-testid="vdirs-page" className="flex min-h-dvh flex-col">
+    <div data-testid="vdirs-page" className="flex min-h-dvh flex-col pb-24 md:pb-0">
       <div className="px-4 pt-1 pb-1">
         <div className="flex items-center justify-between">
           <button

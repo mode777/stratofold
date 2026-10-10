@@ -46,7 +46,7 @@ export function UploadPanel({ queue = uploadQueue }: { queue?: UploadQueue } = {
   const active = items.filter((it) => isActive(it.state)).length;
 
   return (
-    <section data-testid="upload-panel" aria-label="Uploads" className="flex min-h-dvh flex-col">
+    <section data-testid="upload-panel" aria-label="Uploads" className="flex min-h-dvh flex-col pb-24 md:pb-0">
       <div className="flex items-center justify-between px-5 pt-3 pb-2">
         <h1 className="text-[34px] font-bold leading-tight tracking-tight text-ios-label">Uploads</h1>
         {items.length > 0 && (

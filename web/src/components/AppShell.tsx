@@ -98,7 +98,12 @@ export function AppShell() {
     <div className="flex h-dvh overflow-hidden bg-ios-bg text-ios-label">
       <Sidebar activeUploads={activeUploads} />
       <main className="flex min-w-0 flex-1 flex-col">
-        <div className="min-h-0 flex-1 overflow-y-auto pb-24 md:pb-0">
+        {/* No shell-level bottom padding (design D4 of
+            fix-web-ui-and-session-lifetime): the tab bar is a fixed
+            overlay, so each destination owns its bottom clearance and
+            the browse listing reaches the viewport bottom beneath the
+            translucent bar. */}
+        <div className="min-h-0 flex-1 overflow-y-auto" data-testid="shell-scroll">
           <Outlet />
         </div>
       </main>

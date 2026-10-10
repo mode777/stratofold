@@ -104,6 +104,29 @@ func TestLoginIssuesTokenAndSessionCookie(t *testing.T) {
 	}
 }
 
+func TestLoginCookieIsPersistent(t *testing.T) {
+	s := testapp.Start(t)
+
+	_, resp := login(t, s, testapp.TestUserEmail, testapp.TestUserPassword, "")
+
+	var session *http.Cookie
+	for _, c := range resp.Cookies() {
+		if c.Name == authbridge.SessionCookieName {
+			session = c
+		}
+	}
+	if session == nil {
+		t.Fatalf("login: no %s Set-Cookie", authbridge.SessionCookieName)
+	}
+	// 400 days — the browser-standard maximum cookie persistence
+	// (RFC 6265bis). The server sends the users collection's full
+	// auth-token duration (94,670,856 s ≈ 3 y); browsers clamp it.
+	const minPersistentAge = 34560000
+	if session.MaxAge < minPersistentAge {
+		t.Fatalf("login: %s MaxAge = %d, want >= %d (persistent cookie)", authbridge.SessionCookieName, session.MaxAge, minPersistentAge)
+	}
+}
+
 func TestLoginTokenAuthenticatesBuiltinEndpoint(t *testing.T) {
 	s := testapp.Start(t)
 

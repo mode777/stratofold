@@ -38,6 +38,13 @@ describe("AppShell", () => {
     expect(sidebar.className).toContain("md:flex");
   });
 
+  it("reserves no shell-level bottom strip above the tab bar", () => {
+    // The tab bar is a fixed overlay (design D4): destinations own
+    // their clearance so the listing reaches the viewport bottom.
+    renderShell("/files");
+    expect(screen.getByTestId("shell-scroll").className).not.toContain("pb-24");
+  });
+
   it("counts only active uploads for the badge", () => {
     expect(
       activeUploadCount([

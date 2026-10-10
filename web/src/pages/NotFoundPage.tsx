@@ -8,7 +8,7 @@ export function NotFoundPage() {
   return (
     <div
       data-testid="page-not-found"
-      className="flex min-h-dvh flex-col items-center justify-center px-6 text-center"
+      className="flex min-h-dvh flex-col items-center justify-center px-6 pb-24 text-center md:pb-0"
     >
       <span className="mb-4 flex h-20 w-20 items-center justify-center rounded-3xl bg-ios-blue/10 text-3xl text-ios-blue">
         <DocIcon />

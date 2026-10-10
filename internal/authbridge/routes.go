@@ -53,11 +53,19 @@ func handleAuthLogin(e *core.RequestEvent) error {
 		return e.InternalServerError("Failed to create auth token", err)
 	}
 
+	// The cookie lives exactly as long as the token (design D2): the
+	// users collection's auth-token duration is the single source of
+	// truth (migration 1770000004 pins it to the platform maximum).
+	users, err := e.App.FindCollectionByNameOrId(UsersCollection)
+	if err != nil {
+		return e.InternalServerError("Failed to load users collection", err)
+	}
+
 	// same convention as apis.RecordAuthResponse: the authenticated
 	// record always exposes its own email
 	record.IgnoreEmailVisibility(true)
 
-	http.SetCookie(e.Response, sessionCookie(token, requestIsSecure(e.Request)))
+	http.SetCookie(e.Response, sessionCookie(token, int(users.AuthToken.Duration), requestIsSecure(e.Request)))
 	return e.JSON(http.StatusOK, map[string]any{"token": token, "record": record})
 }
 

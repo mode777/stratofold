@@ -17,21 +17,27 @@ const UsersCollection = "users"
 
 // sessionCookie builds the sf_session cookie. HttpOnly + SameSite=Lax
 // always; Secure when the request arrived over HTTPS (direct TLS or a
-// trusted X-Forwarded-Proto, docs/architecture.md deployment).
-func sessionCookie(token string, secure bool) *http.Cookie {
+// trusted X-Forwarded-Proto, docs/architecture.md deployment). maxAge
+// is the cookie lifetime in seconds: > 0 emits a persistent cookie
+// (Max-Age), 0 leaves a browser-session cookie (no Max-Age attribute).
+// Login passes the users collection's auth-token duration (design D2),
+// so the cookie lives exactly as long as the token it carries.
+func sessionCookie(token string, maxAge int, secure bool) *http.Cookie {
 	return &http.Cookie{
 		Name:     SessionCookieName,
 		Value:    token,
 		Path:     "/",
+		MaxAge:   maxAge,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 		Secure:   secure,
 	}
 }
 
-// clearSessionCookie expires the sf_session cookie in the browser.
+// clearSessionCookie expires the sf_session cookie in the browser
+// (Max-Age=0 deletes even a persistent cookie).
 func clearSessionCookie(secure bool) *http.Cookie {
-	c := sessionCookie("", secure)
+	c := sessionCookie("", 0, secure)
 	c.MaxAge = -1
 	return c
 }

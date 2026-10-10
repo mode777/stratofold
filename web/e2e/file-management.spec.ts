@@ -156,3 +156,51 @@ test.describe("file management", () => {
     await expect(page.getByTestId("share-row")).toHaveCount(0);
   });
 });
+
+// Mobile-viewport coverage for fix-web-ui-and-session-lifetime: the
+// preview screen navigates back to its containing directory, and the
+// write actions live in the folder header while the toolbar stays
+// view-controls-only — everything fully on-screen (no cut-off).
+test.describe("preview navigation and header actions", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test("preview back returns to the containing directory", async ({ page }) => {
+    await login(page, OWNER);
+    await openHome(page);
+
+    await entryRow(page, "hello.txt").getByTestId("open-preview").click();
+    await expect(page.getByTestId("preview-download")).toBeVisible();
+
+    await page.getByTestId("back").click();
+    await expect(page.getByTestId("breadcrumbs")).toContainText("Home");
+    await expect(entryRow(page, "hello.txt")).toBeVisible();
+  });
+
+  test("write actions live in the folder header at a mobile viewport", async ({ page }) => {
+    await login(page, OWNER);
+    await openHome(page);
+
+    const header = page.getByTestId("header-actions");
+    const newFolder = header.getByTestId("new-folder");
+    const uploadButton = header.getByTestId("upload-button");
+    await expect(newFolder).toBeVisible();
+    await expect(uploadButton).toBeVisible();
+
+    // Above the breadcrumbs, and inside the viewport width.
+    const actionsBox = (await header.boundingBox())!;
+    const crumbsBox = (await page.getByTestId("breadcrumbs").boundingBox())!;
+    expect(actionsBox.y + actionsBox.height).toBeLessThanOrEqual(crumbsBox.y + 1);
+    const width = page.viewportSize()!.width;
+    for (const box of [actionsBox, (await newFolder.boundingBox())!, (await uploadButton.boundingBox())!]) {
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+    }
+
+    // The compact toolbar holds only the view controls.
+    const toolbar = page.getByTestId("toolbar");
+    await expect(toolbar.getByTestId("sort-key")).toBeVisible();
+    await expect(toolbar.getByTestId("view-grid")).toBeVisible();
+    await expect(toolbar.getByTestId("new-folder")).toHaveCount(0);
+    await expect(toolbar.getByTestId("upload-button")).toHaveCount(0);
+  });
+});

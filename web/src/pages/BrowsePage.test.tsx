@@ -321,6 +321,49 @@ async function openMenu(name: string) {
 }
 
 describe("file management actions", () => {
+  it("offers header write actions to the owner, above the breadcrumbs, with a view-only toolbar", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    installFetchMock([lsRouter("v1", { "": SAMPLE })]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+
+    const actions = await screen.findByTestId("header-actions");
+    expect(within(actions).getByTestId("new-folder")).toBeInTheDocument();
+    expect(within(actions).getByTestId("upload-button")).toBeInTheDocument();
+    expect(within(actions).getByTestId("upload-input")).toBeInTheDocument();
+
+    // The header actions sit above the breadcrumbs inside the folder
+    // header (spec: writer sees header actions above the breadcrumbs).
+    const crumbs = screen.getByTestId("breadcrumbs");
+    expect(actions.compareDocumentPosition(crumbs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // The compact toolbar holds only the view controls.
+    const toolbar = screen.getByTestId("toolbar");
+    expect(within(toolbar).getByTestId("sort-key")).toBeInTheDocument();
+    expect(within(toolbar).getByTestId("sort-direction")).toBeInTheDocument();
+    expect(within(toolbar).getByTestId("view-list")).toBeInTheDocument();
+    expect(within(toolbar).getByTestId("view-grid")).toBeInTheDocument();
+    expect(within(toolbar).queryByTestId("new-folder")).not.toBeInTheDocument();
+    expect(within(toolbar).queryByTestId("upload-button")).not.toBeInTheDocument();
+    expect(within(toolbar).queryByTestId("upload-input")).not.toBeInTheDocument();
+  });
+
+  it("keeps header and toolbar controls free of horizontal overflow classes at a narrow viewport", async () => {
+    // jsdom does no layout; the pixel-level check runs in the e2e
+    // suite at a mobile viewport. Here we pin the structural shape
+    // that prevents cut-off controls: both rows lay out on a single
+    // non-wrapping flex line inside the full-width header block.
+    installPbMock([collectionList("vdirs", [MINE])]);
+    installFetchMock([lsRouter("v1", { "": SAMPLE })]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+
+    const header = screen.getByTestId("header-actions").parentElement as HTMLElement;
+    expect(header.className).toContain("px-4");
+    expect(screen.getByTestId("header-actions").className).toContain("flex");
+    expect(screen.getByTestId("toolbar").className).toContain("flex");
+  });
+
   it("offers write actions to the owner and completes a create-folder", async () => {
     installPbMock([collectionList("vdirs", [MINE])]);
     const calls: OpCall[] = [];
@@ -410,6 +453,7 @@ describe("file management actions", () => {
 
     expect(screen.queryByTestId("new-folder")).not.toBeInTheDocument();
     expect(screen.queryByTestId("upload-input")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("header-actions")).not.toBeInTheDocument();
 
     await openMenu("a.txt");
     const menu = await screen.findByTestId("context-menu");
@@ -552,6 +596,7 @@ describe("anonymous public mode", () => {
     expect(screen.queryByTestId("new-folder")).not.toBeInTheDocument();
     expect(screen.queryByTestId("upload-button")).not.toBeInTheDocument();
     expect(screen.queryByTestId("upload-input")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("header-actions")).not.toBeInTheDocument();
     expect(screen.queryByTestId("back")).not.toBeInTheDocument();
 
     // The context menu of a file entry keeps the read actions but

@@ -106,7 +106,7 @@ export function ConnectionFormPage() {
   if (!isNew && !existing) return <FailureState failure={toApiFailure(new Error("Not found."))} />;
 
   return (
-    <div data-testid="connection-form" className="flex min-h-dvh flex-col">
+    <div data-testid="connection-form" className="flex min-h-dvh flex-col pb-24 md:pb-0">
       <div className="flex items-center justify-between border-b border-ios-separator bg-ios-card px-4 py-3">
         <button type="button" onClick={back} className="text-base text-ios-blue">
           Cancel
