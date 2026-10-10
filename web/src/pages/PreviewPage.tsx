@@ -1,20 +1,24 @@
-// File preview (web-ui spec, design D7): a pushed Quick-Look-style
-// screen for a non-media file, showing client-derived name, size, and
-// modified time from the directory listing, plus a download action.
-// Media files never land here — they open in a new tab at /files.
-// The header (back + file name, fix-web-ui-and-session-lifetime D1)
-// mirrors BrowsePage's and walks the directory tree: back opens the
-// containing directory's listing, at any nesting depth.
+// File preview (web-ui spec): a pushed Quick-Look-style screen. The
+// page owns the shared skeleton — header with back (fix-web-ui D1),
+// the pre-flight directory lookup for client-derived metadata, and
+// the failure states (not-available in public mode, design D3 of
+// add-public-vdir-browsing) — and dispatches the body by file kind
+// (add-audio-player-image-viewer D1): audio to the in-app player,
+// images to the in-app viewer, everything else to the metadata card.
+// Video never lands here — it opens in a new tab at /files.
 
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
-import { filesUrl, ls, type ApiFailure, type LsEntry } from "../lib/filesApi";
-import { browseUrl, decodeSplat, formatModTime, formatSize, parentPath } from "../lib/listing";
+import { ls, type ApiFailure, type LsEntry } from "../lib/filesApi";
+import { entryKind } from "../lib/entryKind";
+import { browseUrl, decodeSplat, parentPath } from "../lib/listing";
 import { toApiFailure } from "../lib/records";
 import { FailureState, Spinner, UnavailableState } from "../components/Errors";
+import { MetadataCard } from "../components/MetadataCard";
 import { usePublicBrowseName } from "../components/PublicGate";
-import { ChevronLeftIcon, DownloadIcon } from "../components/icons";
-import { entryVisual } from "../components/entryVisual";
+import { ChevronLeftIcon } from "../components/icons";
+import { AudioPlayerPage } from "./AudioPlayerPage";
+import { ImageViewerPage } from "./ImageViewerPage";
 
 export function PreviewPage() {
   const { vdirId = "" } = useParams();
@@ -106,45 +110,18 @@ export function PreviewPage() {
     );
   if (!entry) return null;
 
-  const visual = entryVisual(entry);
+  const kind = entryKind(entry.name, entry.dir);
 
   return (
     <div data-testid="preview" className="flex min-h-dvh flex-col pb-24 md:pb-0">
       {header}
-      <div className="flex flex-1 flex-col items-center px-6 py-8">
-        <div className="flex h-40 w-32 flex-col items-center justify-center rounded-xl border border-ios-separator bg-ios-card shadow-md">
-          <span className={`flex h-16 w-16 items-center justify-center rounded-2xl text-4xl ${visual.tone}`}>
-            <visual.Icon />
-          </span>
-        </div>
-        <p className="mt-2 text-xs text-ios-secondary/60">
-          {formatSize(entry.size)} · Modified {formatModTime(entry.modtime)}
-        </p>
-
-        <div className="mt-6 w-full max-w-xs space-y-1.5 rounded-2xl border border-black/5 bg-ios-card p-4 text-left text-xs text-ios-secondary/70 shadow-sm">
-          <div className="flex justify-between">
-            <span>Type</span>
-            <span className="font-semibold text-ios-label">{entry.dir ? "Folder" : "File"}</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Size</span>
-            <span className="font-semibold text-ios-label">{formatSize(entry.size)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Modified</span>
-            <span className="font-semibold text-ios-label">{formatModTime(entry.modtime)}</span>
-          </div>
-        </div>
-
-        <a
-          href={filesUrl(vdirId, path)}
-          download
-          data-testid="preview-download"
-          className="mt-8 flex w-full max-w-xs items-center justify-center gap-2 rounded-xl bg-ios-blue py-3.5 font-semibold text-white shadow-sm active:scale-95"
-        >
-          <DownloadIcon /> Download
-        </a>
-      </div>
+      {kind === "audio" ? (
+        <AudioPlayerPage vdirId={vdirId} path={path} />
+      ) : kind === "image" ? (
+        <ImageViewerPage vdirId={vdirId} path={path} entry={entry} />
+      ) : (
+        <MetadataCard vdirId={vdirId} path={path} entry={entry} />
+      )}
     </div>
   );
 }

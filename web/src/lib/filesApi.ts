@@ -225,10 +225,3 @@ export function filesUrl(vdirId: string, path: string): string {
     .map((s) => encodeURIComponent(s));
   return `/files/${encodeURIComponent(vdirId)}${segments.length ? "/" + segments.join("/") : ""}`;
 }
-
-// mediaType reports whether a name looks like browser-playable media
-// (opened in a new tab at its URL, native player).
-export function isMediaName(name: string): boolean {
-  const media = /\.(mp4|webm|ogv|ogg|mp3|wav|m4a|mov|weba)$/i;
-  return media.test(name);
-}

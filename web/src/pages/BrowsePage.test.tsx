@@ -217,24 +217,68 @@ describe("virtualization", () => {
 });
 
 describe("downloads, media, and preview", () => {
-  it("wires media new-tab and opens the preview for non-media files", async () => {
+  it("wires video to a new tab, audio to the in-app player, and previews other files", async () => {
     installPbMock([collectionList("vdirs", [MINE])]);
     installFetchMock([
-      lsRouter("v1", { "": [entry("movie.mp4", { size: 99 }), entry("notes.txt", { size: 1 })] }),
+      lsRouter("v1", {
+        "": [entry("movie.mp4", { size: 99 }), entry("song.mp3", { size: 5 }), entry("notes.txt", { size: 1 })],
+      }),
     ]);
-    renderBrowse();
+    const view = renderBrowse();
     await screen.findByTestId("entry-0");
 
+    // Video keeps the new-tab native player.
     const movieRow = screen.getByText("movie.mp4").closest("[data-testid^='entry-']") as HTMLElement;
     const movieLink = within(movieRow).getByTestId("open-media");
     expect(movieLink).toHaveAttribute("href", "/files/v1/movie.mp4");
     expect(movieLink).toHaveAttribute("target", "_blank");
 
-    const notesRow = screen.getByText("notes.txt").closest("[data-testid^='entry-']") as HTMLElement;
-    await userEvent.setup().click(within(notesRow).getByTestId("open-preview"));
+    // Audio opens the in-app player instead of a new tab.
+    const songRow = screen.getByText("song.mp3").closest("[data-testid^='entry-']") as HTMLElement;
+    await userEvent.setup().click(within(songRow).getByTestId("open-preview"));
 
+    await waitFor(() => expect(screen.getByTestId("audio-stream")).toBeInTheDocument());
+    expect(screen.getByTestId("audio-title")).toHaveTextContent("song.mp3");
+    expect(within(screen.getByTestId("preview")).getByTestId("preview-download")).toHaveAttribute(
+      "href",
+      "/files/v1/song.mp3",
+    );
+    view.unmount();
+
+    const notesView = renderBrowse("view/notes.txt");
     await waitFor(() => expect(screen.getByTestId("preview")).toHaveTextContent("notes.txt"));
     expect(screen.getByTestId("preview-download")).toHaveAttribute("href", "/files/v1/notes.txt");
+    notesView.unmount();
+  });
+
+  it("dispatches the view route by kind: audio to the player, image to the viewer", async () => {
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => "blob:mock-url"),
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      writable: true,
+      value: vi.fn(),
+    });
+    installPbMock([collectionList("vdirs", [MINE])]);
+    installFetchMock([
+      lsRouter("v1", { "": [entry("song.mp3", { size: 5 }), entry("hero.png", { size: 9 })] }),
+      (url: string) => (url === "/files/v1/hero.png" ? jsonResponse(200, { ok: true }) : undefined),
+    ]);
+
+    const audioView = renderBrowse("view/song.mp3");
+    await waitFor(() => expect(screen.getByTestId("audio-stream")).toBeInTheDocument());
+    expect(screen.getByTestId("audio-title")).toHaveTextContent("song.mp3");
+    expect(screen.getByTestId("preview-download")).toHaveAttribute("href", "/files/v1/song.mp3");
+    audioView.unmount();
+
+    const imageView = renderBrowse("view/hero.png");
+    await waitFor(() => expect(screen.getByTestId("image-frame")).toBeInTheDocument());
+    expect(screen.getByTestId("image-frame")).toHaveAttribute("alt", "hero.png");
+    expect(screen.getByTestId("preview-download")).toHaveAttribute("href", "/files/v1/hero.png");
+    imageView.unmount();
   });
 
   it("returns from the preview to the containing directory at any depth", async () => {
@@ -270,6 +314,19 @@ describe("downloads, media, and preview", () => {
     await user.keyboard("{Enter}");
 
     await waitFor(() => expect(screen.getByTestId("breadcrumbs")).toHaveTextContent("Mine"));
+  });
+
+  it("opens the audio player from the context menu's Open action", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    installFetchMock([lsRouter("v1", { "": [entry("song.flac", { size: 7 })] })]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+
+    await openMenu("song.flac");
+    await userEvent.setup().click(await screen.findByTestId("action-open"));
+
+    await waitFor(() => expect(screen.getByTestId("audio-stream")).toBeInTheDocument());
+    expect(screen.getByTestId("audio-title")).toHaveTextContent("song.flac");
   });
 
   it("offers a Download action in the context menu through the /files URL", async () => {

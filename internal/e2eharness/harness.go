@@ -8,6 +8,9 @@
 package e2eharness
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"net/http"
@@ -235,6 +238,15 @@ func seedDataset(root string) error {
 	if err := os.WriteFile(filepath.Join(root, "movie.mp4"), minimalMP4(), 0o644); err != nil {
 		return err
 	}
+	// song.wav and photo.png feed the media E2E flows: the audio
+	// player's controls (a real 1-second PCM WAV so the browser can
+	// decode it) and the in-app image render (a real 1x1 PNG).
+	if err := os.WriteFile(filepath.Join(root, "song.wav"), tinyWAV(), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(root, "photo.png"), tinyPNG(), 0o644); err != nil {
+		return err
+	}
 	for i := 0; i < BigDirCount; i++ {
 		name := filepath.Join(root, "big", "file-"+pad(i)+".txt")
 		if err := os.WriteFile(name, []byte(strconv.Itoa(i)), 0o644); err != nil {
@@ -272,3 +284,39 @@ func minimalMP4() []byte {
 
 // BaseURLOf returns the stack's base URL (helper for callers).
 func (s *Stack) BaseURLOf() string { return s.BaseURL }
+
+// tinyWAV is a real 1-second 8 kHz 8-bit mono PCM WAV (silence) so the
+// browser decodes it and the audio player's controls render.
+func tinyWAV() []byte {
+	const sampleRate = 8000
+	samples := make([]byte, sampleRate) // 1s of 8-bit silence (0x80)
+	for i := range samples {
+		samples[i] = 0x80
+	}
+	buf := &bytes.Buffer{}
+	buf.WriteString("RIFF")
+	_ = binary.Write(buf, binary.LittleEndian, uint32(36+len(samples)))
+	buf.WriteString("WAVEfmt ")
+	_ = binary.Write(buf, binary.LittleEndian, uint32(16))          // fmt chunk size
+	_ = binary.Write(buf, binary.LittleEndian, uint16(1))           // PCM
+	_ = binary.Write(buf, binary.LittleEndian, uint16(1))           // mono
+	_ = binary.Write(buf, binary.LittleEndian, uint32(sampleRate))  // sample rate
+	_ = binary.Write(buf, binary.LittleEndian, uint32(sampleRate))  // byte rate
+	_ = binary.Write(buf, binary.LittleEndian, uint16(1))           // block align
+	_ = binary.Write(buf, binary.LittleEndian, uint16(8))           // bits per sample
+	buf.WriteString("data")
+	_ = binary.Write(buf, binary.LittleEndian, uint32(len(samples)))
+	buf.Write(samples)
+	return buf.Bytes()
+}
+
+// tinyPNG is a real 1x1 transparent PNG so the browser can decode and
+// render it in the in-app image viewer.
+func tinyPNG() []byte {
+	const b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+	png, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		panic(fmt.Sprintf("e2eharness: tinyPNG: %v", err))
+	}
+	return png
+}

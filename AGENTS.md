@@ -121,10 +121,17 @@ see `docs/architecture.md`; finer details still follow.
   (Vite + React + TS + Tailwind, ADR 0005) and is an iOS-style mobile
   shell (ADR 0008): a translucent bottom tab bar below `md` and a
   persistent sidebar at `md`+, with Files / Uploads / Settings
-  destinations. Routes: `/` → `/files` (Locations), `/v/:vdirId/*`
-  (browse), `/v/:vdirId/view/*` (preview), `/v/:vdirId/move` (move
+   destinations. Routes: `/` → `/files` (Locations), `/v/:vdirId/*`
+  (browse), `/v/:vdirId/view/*` (preview — dispatched by file kind into
+  the in-app audio player, the in-app image viewer, or the Quick Look
+  metadata card), `/v/:vdirId/move` (move
   picker), `/uploads`, `/settings`, `/settings/connections[/:id]`,
   `/settings/vdirs[/:id[/sharing]]`; unknown routes show Page Not Found.
+  Tap behavior follows the file kind (`web/src/lib/entryKind.ts`):
+  audio opens the in-app player and images the in-app viewer (both
+  under `/v/:vdirId/view/*`, streaming the plain `/files` URL), video
+  still opens a new tab at `/files`. Download stays available in the
+  context menu for every file and inside the player and viewer.
   The SPA is installable as a PWA (ADR 0009): `web/public/manifest.json`
   (served as `application/json`) and the committed icons under
   `web/public/icons/` are linked from `web/index.html`, Settings offers an

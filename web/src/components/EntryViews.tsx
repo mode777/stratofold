@@ -6,7 +6,8 @@
 
 import { useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { filesUrl, isMediaName, type LsEntry } from "../lib/filesApi";
+import { filesUrl, type LsEntry } from "../lib/filesApi";
+import { entryKind } from "../lib/entryKind";
 import { formatModTime, formatSize } from "../lib/listing";
 import { entryVisual } from "./entryVisual";
 import { EllipsisIcon } from "./icons";
@@ -51,6 +52,7 @@ function PrimaryTarget({
   onPreview: (entry: LsEntry, path: string) => void;
 }) {
   const cls = "flex min-w-0 flex-1 items-center gap-3 text-left";
+  const kind = entryKind(entry.name, entry.dir);
   if (entry.dir) {
     return (
       <button type="button" data-testid="open-dir" onClick={() => onOpenDir(path)} className={cls}>
@@ -59,7 +61,7 @@ function PrimaryTarget({
       </button>
     );
   }
-  if (isMediaName(entry.name)) {
+  if (kind === "video") {
     return (
       <a
         href={filesUrl(vdirId, path)}
@@ -338,7 +340,7 @@ function GridCell({
         <button type="button" data-testid="open-dir" onClick={() => onOpenDir(path)} className={targetCls}>
           {body}
         </button>
-      ) : isMediaName(entry.name) ? (
+      ) : entryKind(entry.name) === "video" ? (
         <a
           href={filesUrl(vdirId, path)}
           target="_blank"

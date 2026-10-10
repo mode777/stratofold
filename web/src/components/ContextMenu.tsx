@@ -1,10 +1,13 @@
 // Long-press / ellipsis context menu (web-ui spec): role-gated entry
-// actions in an iOS action menu. Open and Download for everyone, media
-// also opens in a new tab, and Rename/Move/Delete only for writers.
+// actions in an iOS action menu. Open and Download for everyone —
+// open leads in-app (player for audio, viewer for images, Quick Look
+// for other files); only video opens in a new tab. Rename/Move/Delete
+// are writer-only.
 
 import { useEffect, type ReactElement, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { filesUrl, isMediaName, type LsEntry } from "../lib/filesApi";
+import { filesUrl, type LsEntry } from "../lib/filesApi";
+import { entryKind } from "../lib/entryKind";
 import {
   ChevronRightIcon,
   DownloadIcon,
@@ -89,7 +92,7 @@ export function ContextMenu({
   }, [onClose]);
 
   const url = filesUrl(vdirId, path);
-  const media = !entry.dir && isMediaName(entry.name);
+  const kind = entryKind(entry.name, entry.dir);
   const visual = entryVisual(entry);
 
   return createPortal(
@@ -106,7 +109,15 @@ export function ContextMenu({
           <span className="min-w-0">
             <span className="block truncate text-base font-bold text-ios-label">{entry.name}</span>
             <span className="block text-xs text-ios-secondary/60">
-              {entry.dir ? "Folder" : media ? "Media" : "File"}
+              {entry.dir
+                ? "Folder"
+                : kind === "audio"
+                  ? "Audio"
+                  : kind === "image"
+                    ? "Image"
+                    : kind === "video"
+                      ? "Video"
+                      : "File"}
             </span>
           </span>
         </div>
@@ -119,16 +130,21 @@ export function ContextMenu({
             <MenuItem label="Open" testid="action-open" Icon={ChevronRightIcon} onClick={() => onOpenDir?.(path)} />
           ) : (
             <>
-              {!media && (
+              {kind === "video" ? (
+                <MenuItem
+                  label="Open in new tab"
+                  testid="action-open-tab"
+                  Icon={ChevronRightIcon}
+                  href={url}
+                  target="_blank"
+                />
+              ) : (
                 <MenuItem
                   label="Open"
                   testid="action-open"
                   Icon={ChevronRightIcon}
                   onClick={() => onPreview?.(entry, path)}
                 />
-              )}
-              {media && (
-                <MenuItem label="Open in new tab" testid="action-open-tab" Icon={ChevronRightIcon} href={url} target="_blank" />
               )}
               <MenuItem label="Download" testid="action-download" Icon={DownloadIcon} href={url} download />
             </>

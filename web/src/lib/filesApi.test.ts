@@ -3,7 +3,6 @@ import {
   ApiFailure,
   UploadCanceled,
   filesUrl,
-  isMediaName,
   ls,
   mkdir,
   mv,
@@ -86,16 +85,6 @@ describe("filesUrl", () => {
     expect(filesUrl("abc123", "")).toBe("/files/abc123");
     expect(filesUrl("abc123", "docs/sub/a b.txt")).toBe("/files/abc123/docs/sub/a%20b.txt");
     expect(filesUrl("abc123", "weird%20name")).toBe("/files/abc123/weird%2520name");
-  });
-});
-
-describe("isMediaName", () => {
-  it("recognizes browser-playable media", () => {
-    expect(isMediaName("movie.MP4")).toBe(true);
-    expect(isMediaName("clip.webm")).toBe(true);
-    expect(isMediaName("song.mp3")).toBe(true);
-    expect(isMediaName("notes.txt")).toBe(false);
-    expect(isMediaName("archive.zip")).toBe(false);
   });
 });
 

@@ -1,9 +1,11 @@
 // Per-type visual for a listing entry (design D7): a tinted icon
-// derived from the file extension. Media-ness for tap behavior still
-// comes from filesApi.isMediaName; this is display only.
+// derived from the file's kind (lib/entryKind, design D2 of
+// add-audio-player-image-viewer). Display only — tap behavior is
+// decided by the same kind at the entry views.
 
 import type { ReactElement } from "react";
 import type { LsEntry } from "../lib/filesApi";
+import { entryKind, type EntryKind } from "../lib/entryKind";
 import { DocIcon, FilmIcon, FolderIcon, ImageIcon, MusicIcon, type IconProps } from "./icons";
 
 export type EntryVisual = {
@@ -11,15 +13,19 @@ export type EntryVisual = {
   tone: string;
 };
 
-const VIDEO = /\.(mp4|webm|ogv|mov|m4v)$/i;
-const AUDIO = /\.(mp3|wav|m4a|ogg|weba|flac|aac)$/i;
-const IMAGE = /\.(jpg|jpeg|png|gif|webp|heic|bmp|svg|dng)$/i;
+const TONES: Record<Exclude<EntryKind, "dir">, EntryVisual> = {
+  audio: { Icon: MusicIcon, tone: "bg-pink-50 text-pink-600" },
+  image: { Icon: ImageIcon, tone: "bg-emerald-50 text-ios-green" },
+  video: { Icon: FilmIcon, tone: "bg-violet-50 text-violet-600" },
+  // PDFs keep their own accent within the generic document kind.
+  other: { Icon: DocIcon, tone: "bg-ios-secondary/10 text-ios-secondary" },
+};
 
 export function entryVisual(entry: LsEntry): EntryVisual {
-  if (entry.dir) return { Icon: FolderIcon, tone: "bg-ios-blue/10 text-ios-blue" };
-  if (VIDEO.test(entry.name)) return { Icon: FilmIcon, tone: "bg-violet-50 text-violet-600" };
-  if (AUDIO.test(entry.name)) return { Icon: MusicIcon, tone: "bg-pink-50 text-pink-600" };
-  if (IMAGE.test(entry.name)) return { Icon: ImageIcon, tone: "bg-emerald-50 text-ios-green" };
-  if (/\.pdf$/i.test(entry.name)) return { Icon: DocIcon, tone: "bg-orange-50 text-orange-600" };
-  return { Icon: DocIcon, tone: "bg-ios-secondary/10 text-ios-secondary" };
+  const kind = entryKind(entry.name, entry.dir);
+  if (kind === "dir") return { Icon: FolderIcon, tone: "bg-ios-blue/10 text-ios-blue" };
+  if (!entry.dir && /\.pdf$/i.test(entry.name)) {
+    return { Icon: DocIcon, tone: "bg-orange-50 text-orange-600" };
+  }
+  return TONES[kind];
 }
