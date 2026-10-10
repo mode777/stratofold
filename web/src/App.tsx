@@ -1,7 +1,8 @@
-import { Navigate, Route, Routes } from "react-router";
+import { Navigate, Outlet, Route, Routes, useLocation } from "react-router";
 import { SessionProvider, useSession } from "./lib/session";
 import { Spinner } from "./components/Errors";
 import { AppShell } from "./components/AppShell";
+import { PublicGate } from "./components/PublicGate";
 import { LoginPage } from "./pages/LoginPage";
 import { LocationsPage } from "./pages/LocationsPage";
 import { BrowsePage } from "./pages/BrowsePage";
@@ -25,13 +26,56 @@ export function App() {
 }
 
 // Session gate (web-ui spec): unauthenticated visitors see only the
-// login screen; a rejected session flips state and lands them back
-// there from anywhere.
+// login screen — except for the two route shapes of a public vdir's
+// anonymous browsing (browse and preview), which render the
+// self-contained public routes instead. A rejected session flips
+// state and lands the user back on the login screen from anywhere.
 function SessionGate() {
   const { state } = useSession();
+  const { pathname } = useLocation();
   if (state === "checking") return <Spinner label="Checking session…" />;
-  if (state === "anonymous") return <LoginPage />;
+  if (state === "anonymous") {
+    return isAnonymousAllowed(pathname) ? <PublicRoutes /> : <LoginPage />;
+  }
   return <AppRoutes />;
+}
+
+// isAnonymousAllowed reports whether the location is a vdir browse or
+// preview route — the only shapes an unauthenticated visitor may open.
+// The move picker and every management destination stay behind login.
+function isAnonymousAllowed(pathname: string): boolean {
+  const segments = pathname.split("/").filter((s) => s.length > 0);
+  if (segments[0] !== "v" || segments.length < 2) return false;
+  return segments[2] !== "move";
+}
+
+// Public routes (design D1/D3): the anonymous read-only world. It
+// never mounts the application shell, so no Files / Uploads /
+// Settings destination exists for an unauthenticated visitor; the
+// PublicGate turns a non-public or unknown vdir into the login
+// screen, fail-closed.
+function PublicRoutes() {
+  return (
+    <Routes>
+      <Route element={<PublicShell />}>
+        <Route path="/v/:vdirId/view/*" element={<PublicGate><PreviewPage /></PublicGate>} />
+        <Route path="/v/:vdirId/*" element={<PublicGate><BrowsePage /></PublicGate>} />
+        <Route path="*" element={<LoginPage />} />
+      </Route>
+    </Routes>
+  );
+}
+
+// PublicShell is the anonymous browsing chrome: just the scrollable
+// content area — the browse/preview pages carry their own navigation.
+function PublicShell() {
+  return (
+    <div className="flex h-dvh flex-col overflow-hidden bg-ios-bg text-ios-label">
+      <main className="min-h-0 flex-1 overflow-y-auto">
+        <Outlet />
+      </main>
+    </div>
+  );
 }
 
 export function AppRoutes() {

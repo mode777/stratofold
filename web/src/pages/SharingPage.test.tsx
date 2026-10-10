@@ -190,3 +190,48 @@ describe("sharing page", () => {
     expect(store.calls.some((c) => c.method === "POST")).toBe(false);
   });
 });
+
+describe("sharing page public link", () => {
+  function vdirRecord(isPublic: boolean) {
+    return { id: "v1", owner: "u1", name: "Mine", root_path: "/srv", is_public: isPublic, connection: "c1" };
+  }
+
+  function renderWith(isPublic: boolean) {
+    installPbMock([
+      (path) => (path.includes("/collections/vdirs/records") ? listOf([vdirRecord(isPublic)]) : undefined),
+      (path) => (path.includes("/collections/vdir_shares/records") ? listOf([]) : undefined),
+    ]);
+    installFetchMock([]);
+    return render(
+      <MemoryRouter initialEntries={["/settings/vdirs/v1/sharing"]}>
+        <Routes>
+          <Route path="/settings/vdirs/:id/sharing" element={<SharingPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("shows the absolute browse link with a working copy action for a public vdir", async () => {
+    renderWith(true);
+
+    const link = await screen.findByTestId("public-link");
+    expect(link).toHaveTextContent(`${window.location.origin}/v/v1`);
+    expect(screen.getByTestId("public-link-copy")).toBeInTheDocument();
+
+    // user-event stubs the navigator clipboard; reading it back
+    // asserts the copy action really published the URL.
+    await userEvent.setup().click(screen.getByTestId("public-link-copy"));
+
+    await waitFor(() => expect(screen.getByTestId("public-link-copied")).toBeInTheDocument());
+    await expect(navigator.clipboard.readText()).resolves.toBe(`${window.location.origin}/v/v1`);
+  });
+
+  it("states that no public link exists for a non-public vdir", async () => {
+    renderWith(false);
+
+    await screen.findByTestId("public-link-section");
+    expect(screen.getByTestId("public-link-none")).toBeInTheDocument();
+    expect(screen.queryByTestId("public-link")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("public-link-copy")).not.toBeInTheDocument();
+  });
+});

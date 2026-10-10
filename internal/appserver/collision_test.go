@@ -13,6 +13,7 @@ import (
 	"github.com/mode777/stratofold/internal/fsapi"
 	"github.com/mode777/stratofold/internal/testapp"
 	"github.com/mode777/stratofold/internal/userlookup"
+	"github.com/mode777/stratofold/internal/vdirmeta"
 )
 
 func bodyBytes(t *testing.T, resp *http.Response) []byte {
@@ -68,6 +69,17 @@ func TestUserLookupRoutesStayInsideSfNamespace(t *testing.T) {
 	for _, r := range userlookup.CustomRoutes() {
 		if !strings.HasPrefix(r.Path, "/api/sf/") {
 			t.Errorf("lookup route %s %s escaped the /api/sf/ namespace", r.Method, r.Path)
+		}
+	}
+}
+
+func TestVdirMetaRoutesStayInsideSfNamespace(t *testing.T) {
+	if got := len(vdirmeta.CustomRoutes()); got == 0 {
+		t.Fatal("no vdir-meta routes registered")
+	}
+	for _, r := range vdirmeta.CustomRoutes() {
+		if !strings.HasPrefix(r.Path, "/api/sf/") {
+			t.Errorf("vdir-meta route %s %s escaped the /api/sf/ namespace", r.Method, r.Path)
 		}
 	}
 }
@@ -215,6 +227,36 @@ func TestBuiltinEndpointsStillBehaveAsBuiltins(t *testing.T) {
 		defer resp3.Body.Close()
 		if resp3.StatusCode != http.StatusOK {
 			t.Fatalf("/api/health after userlookup wiring: status %d", resp3.StatusCode)
+		}
+	})
+
+	t.Run("/api/sf/vdirs/*/meta is the vdirmeta route's", func(t *testing.T) {
+		// An unknown vdir id reaches the vdirmeta handler (message
+		// "Not found.") and is never answered by the SPA fallback
+		// (which would return the index.html with 200) or by
+		// PocketBase's built-in API 404 (different message).
+		resp, err := http.Get(s.BaseURL + "/api/sf/vdirs/000000000000000/meta")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b := bodyBytes(t, resp)
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("vdir-meta probe: status %d, want 404", resp.StatusCode)
+		}
+		if !bytes.Contains(b, []byte(`"message":"Not found."`)) {
+			t.Fatalf("vdir-meta probe did not reach the vdirmeta handler: %s", b)
+		}
+		if bytes.Contains(bytes.ToLower(b), []byte("<!doctype")) {
+			t.Fatalf("vdir-meta probe fell through to the SPA shell: %s", b)
+		}
+		resp4, err := http.Get(s.BaseURL + "/api/health")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp4.Body.Close()
+		if resp4.StatusCode != http.StatusOK {
+			t.Fatalf("/api/health after vdirmeta wiring: status %d", resp4.StatusCode)
 		}
 	})
 }

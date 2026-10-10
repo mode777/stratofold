@@ -223,6 +223,12 @@ func seedDataset(root string) error {
 	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("hello stratofold\n"), 0o644); err != nil {
 		return err
 	}
+	// index.html is the public-vdir web-hosting fixture: the file
+	// server's directory→index resolution serves it to anonymous
+	// visitors on the public vdir.
+	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("<html><body>stratofold hosting</body></html>\n"), 0o644); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(root, "docs", "readme.md"), []byte("# docs\n"), 0o644); err != nil {
 		return err
 	}

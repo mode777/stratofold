@@ -19,7 +19,7 @@ import {
 } from "../lib/records";
 import { useSession } from "../lib/session";
 import { FailureState, Spinner } from "../components/Errors";
-import { ChevronLeftIcon, PersonIcon } from "../components/icons";
+import { ChevronLeftIcon, LinkIcon, PersonIcon } from "../components/icons";
 import type { ApiFailure } from "../lib/filesApi";
 
 export function SharingPage() {
@@ -37,6 +37,21 @@ export function SharingPage() {
   const [role, setRole] = useState<"viewer" | "editor">("viewer");
   const [grantError, setGrantError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  // The public link (web-ui spec): the plain absolute app URL, no
+  // token — its meaning is entirely the vdir's current publicness.
+  // The link always renders as selectable text so the clipboard API's
+  // secure-context requirement can never make it unobtainable.
+  const publicUrl = vdir ? `${window.location.origin}/v/${vdir.id}` : "";
+  const copyPublicLink = async () => {
+    try {
+      await navigator.clipboard.writeText(publicUrl);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -180,6 +195,52 @@ export function SharingPage() {
               {busy ? "Resolving…" : "Grant Access"}
             </button>
           </form>
+
+          {vdir?.is_public ? (
+            <section
+              data-testid="public-link-section"
+              className="space-y-2 rounded-2xl border border-black/5 bg-ios-card p-4 shadow-sm"
+            >
+              <h2 className="text-xs font-bold uppercase tracking-wider text-ios-secondary/60">Public link</h2>
+              <p className="flex items-start gap-2 text-xs text-ios-secondary/70">
+                <LinkIcon className="mt-0.5 shrink-0 text-ios-blue" />
+                <span>Anyone with this link can browse and download — no account needed.</span>
+              </p>
+              <div className="flex items-center gap-2">
+                <code
+                  data-testid="public-link"
+                  className="min-w-0 flex-1 truncate rounded-xl bg-ios-bg px-3 py-2 text-xs text-ios-label select-all"
+                >
+                  {publicUrl}
+                </code>
+                <button
+                  type="button"
+                  data-testid="public-link-copy"
+                  onClick={() => void copyPublicLink()}
+                  className="shrink-0 rounded-xl bg-ios-blue px-3 py-2 text-xs font-semibold text-white shadow-sm active:scale-95"
+                >
+                  {copied ? "Copied" : "Copy link"}
+                </button>
+              </div>
+              {copied && (
+                <p data-testid="public-link-copied" className="text-xs font-semibold text-ios-green">
+                  Link copied to the clipboard.
+                </p>
+              )}
+            </section>
+          ) : (
+            vdir && (
+              <section
+                data-testid="public-link-section"
+                className="space-y-1 rounded-2xl border border-black/5 bg-ios-card p-4 shadow-sm"
+              >
+                <h2 className="text-xs font-bold uppercase tracking-wider text-ios-secondary/60">Public link</h2>
+                <p data-testid="public-link-none" className="text-xs text-ios-secondary/70">
+                  No public link — this vdir is not public. Turn on public access in the vdir's settings to get one.
+                </p>
+              </section>
+            )
+          )}
 
           <section>
             <h2 className="px-2 py-1 text-xs font-semibold uppercase tracking-wider text-ios-secondary/60">

@@ -135,7 +135,18 @@ see `docs/architecture.md`; finer details still follow.
   `/api/sf/auth`; the token goes into the PocketBase SDK auth store
   (record API) and the `sf_session` cookie drives `/files/*`. A new
   route `GET /api/sf/users/lookup?email=…` (`internal/userlookup`)
-  resolves a share grantee by exact email. E2E needs a browser and a
+  resolves a share grantee by exact email. **Public vdirs are browsable
+  without an account** (change `add-public-vdir-browsing`): an anonymous
+  visitor opening `/v/:vdirId` browse or `/v/:vdirId/view/*` gets the
+  read-only public view (no write affordances, no shell destinations,
+  not-available state after un-publish); every other route still lands
+  on the login screen. The gate is `SessionGate` + `PublicGate` in
+  `web/src/App.tsx` probing `GET /api/sf/vdirs/<vdir-id>/meta`
+  (`internal/vdirmeta`: session-free, answers `{name, is_public}` for
+  public vdirs, `404` for non-public/unknown — no existence disclosure).
+  The sharing screen offers the owner the plain absolute
+  `/v/<vdir-id>` link with a copy action for public vdirs (no tokens;
+  revocation is the `is_public` toggle). E2E needs a browser and a
   running stack: `cmd/stratofold-e2e` (`internal/e2eharness`) boots the
   app + in-proc SSH fixture on real ports with seeded users/vdirs/entries
   (including a 10k-entry directory and a media file). **Run E2E
@@ -149,10 +160,12 @@ see `docs/architecture.md`; finer details still follow.
   chrome-headless-shell). Component tests gate locally; E2E gates on
   the verification server.
   Verification: `npm --prefix web run test` (PWA manifest/shell/install-hook
-  tests in `web/src/pwa/` and `web/src/lib/useInstallPrompt.test.tsx`); E2E
+  tests in `web/src/pwa/` and `web/src/lib/useInstallPrompt.test.tsx`; the
+  anonymous-gate matrix in `web/src/App.test.tsx` and the public-mode
+  browse/preview tests in `web/src/pages/BrowsePage.test.tsx`); E2E
   on the build server via `npm --prefix web run e2e` (`web/e2e/pwa.spec.ts`,
-  or the `SF_E2E_BASE_URL` override);
-  `go test ./internal/userlookup/ ./internal/appserver/`.
+  `web/e2e/public-browsing.spec.ts`, or the `SF_E2E_BASE_URL` override);
+  `go test ./internal/vdirmeta/ ./internal/userlookup/ ./internal/appserver/`.
 - **File management & uploads** (roadmap change 8): the browse view
   offers new-folder / rename / move / delete and multi-file upload,
   gated by the signed-in user's effective role on the vdir (owner or

@@ -18,16 +18,17 @@ import (
 	// app migrations (connections/vdirs collections) register on import.
 	_ "github.com/mode777/stratofold/internal/migrations"
 	"github.com/mode777/stratofold/internal/userlookup"
+	"github.com/mode777/stratofold/internal/vdirmeta"
 	"github.com/mode777/stratofold/internal/webassets"
 )
 
 // TimeoutConfig are the http.Server timeout tunables. The zero fields
 // mean "no deadline" where allowed.
 type TimeoutConfig struct {
-	Read             time.Duration
-	Write            time.Duration
-	ReadHeader       time.Duration
-	Idle             time.Duration
+	Read       time.Duration
+	Write      time.Duration
+	ReadHeader time.Duration
+	Idle       time.Duration
 }
 
 // DefaultTimeouts are the production values (design D5): no overall
@@ -86,6 +87,9 @@ func Install(app core.App, opts Options) {
 		fsapi.RegisterRoutes(se.Router.RouterGroup,
 			&hook.Handler[*core.RequestEvent]{Func: ClearStreamDeadlines()})
 		userlookup.RegisterRoutes(se.Router.RouterGroup)
+		// The public-vdir metadata route is session-free by design;
+		// like every custom route it must precede the SPA catch-all.
+		vdirmeta.RegisterRoutes(se.Router.RouterGroup)
 		// The embedded SPA catch-all is registered last so the API
 		// routes above (more specific patterns) always win.
 		webassets.RegisterRoutes(se.Router.RouterGroup)

@@ -5,16 +5,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowsePage } from "./BrowsePage";
 import { PreviewPage } from "./PreviewPage";
 import { MovePickerPage } from "./MovePickerPage";
+import { PublicGate } from "../components/PublicGate";
 import { pb } from "../lib/pb";
-import { collectionList, installFetchMock, installPbMock, jsonResponse } from "../test/mockApi";
+import { collectionList, installFetchMock, installPbMock, jsonResponse, type FetchRoute } from "../test/mockApi";
 import type { LsEntry } from "../lib/filesApi";
 import { uploadQueue } from "../lib/uploadQueue";
 
-const sessionState = vi.hoisted(() => ({ userId: "u1" }));
+const sessionState = vi.hoisted(() => ({ userId: "u1", state: "authenticated" as string }));
 
 vi.mock("../lib/session", () => ({
   useSession: () => ({
-    state: "authenticated",
+    state: sessionState.state,
     userId: sessionState.userId,
     userEmail: "owner@stratofold.test",
     login: vi.fn(),
@@ -56,6 +57,7 @@ beforeEach(() => {
   localStorage.clear();
   pb.authStore.clear();
   sessionState.userId = "u1";
+  sessionState.state = "authenticated";
 });
 
 afterEach(() => {
@@ -233,6 +235,41 @@ describe("downloads, media, and preview", () => {
 
     await waitFor(() => expect(screen.getByTestId("preview")).toHaveTextContent("notes.txt"));
     expect(screen.getByTestId("preview-download")).toHaveAttribute("href", "/files/v1/notes.txt");
+  });
+
+  it("returns from the preview to the containing directory at any depth", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    installFetchMock([
+      lsRouter("v1", {
+        "": SAMPLE,
+        "docs/sub": [entry("deep.txt", { size: 1 })],
+      }),
+    ]);
+    renderBrowse("view/docs/sub/deep.txt");
+
+    await waitFor(() => expect(screen.getByTestId("preview")).toHaveTextContent("deep.txt"));
+
+    await userEvent.setup().click(screen.getByTestId("back"));
+
+    // Back opens the file's immediate parent directory, not the vdir root.
+    await waitFor(() => expect(screen.getByTestId("breadcrumbs")).toHaveTextContent("sub"));
+    await waitFor(() => expect(screen.getByTestId("entry-0")).toHaveTextContent("deep.txt"));
+  });
+
+  it("operates the preview back control from the keyboard", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    installFetchMock([
+      lsRouter("v1", { "": [entry("notes.txt", { size: 1 })] }),
+    ]);
+    renderBrowse("view/notes.txt");
+    await waitFor(() => expect(screen.getByTestId("preview-download")).toBeInTheDocument());
+
+    const user = userEvent.setup();
+    await user.tab();
+    expect(screen.getByTestId("back")).toHaveFocus();
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(screen.getByTestId("breadcrumbs")).toHaveTextContent("Mine"));
   });
 
   it("offers a Download action in the context menu through the /files URL", async () => {
@@ -463,5 +500,120 @@ describe("mutation error states", () => {
 
     await user.click(await screen.findByTestId("action-retry"));
     await waitFor(() => expect(attempts).toBe(2));
+  });
+});
+
+describe("anonymous public mode", () => {
+  function publicMeta(vdirId: string, status = 200): FetchRoute {
+    return (url) =>
+      url === `/api/sf/vdirs/${vdirId}/meta`
+        ? status === 200
+          ? jsonResponse(200, { name: "Public", is_public: true })
+          : jsonResponse(404, { message: "Not found." })
+        : undefined;
+  }
+
+  function renderPublic(path = "", view = false) {
+    const tail = view ? `/view${path ? "/" + path : ""}` : path ? "/" + path : "";
+    return render(
+      <MemoryRouter initialEntries={[`/v/pub${tail}`]}>
+        <Routes>
+          <Route path="/v/:vdirId/view/*" element={<PublicGate><PreviewPage /></PublicGate>} />
+          <Route path="/v/:vdirId/*" element={<PublicGate><BrowsePage /></PublicGate>} />
+          <Route path="/" element={<div data-testid="login-screen">login</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  beforeEach(() => {
+    sessionState.state = "anonymous";
+    sessionState.userId = "";
+  });
+
+  it("browses with the meta-probed name and no record-API call", async () => {
+    const send = installPbMock([]);
+    installFetchMock([publicMeta("pub"), lsRouter("pub", { "": SAMPLE })]);
+
+    renderPublic();
+
+    await screen.findByTestId("entry-0");
+    expect(screen.getByTestId("breadcrumbs")).toHaveTextContent("Public");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("offers no write actions and hides the root back control", async () => {
+    installPbMock([]);
+    installFetchMock([publicMeta("pub"), lsRouter("pub", { "": SAMPLE })]);
+
+    renderPublic();
+
+    await screen.findByTestId("entry-0");
+    expect(screen.queryByTestId("new-folder")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("upload-button")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("upload-input")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("back")).not.toBeInTheDocument();
+
+    // The context menu of a file entry keeps the read actions but
+    // offers none of the write actions.
+    await userEvent.setup().click(within(screen.getByTestId("entry-2")).getByTestId("entry-actions"));
+    await waitFor(() => expect(screen.getByTestId("context-menu")).toBeInTheDocument());
+    expect(screen.getByTestId("action-download")).toBeInTheDocument();
+    expect(screen.queryByTestId("action-rename")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("action-move")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("action-delete")).not.toBeInTheDocument();
+  });
+
+  it("keeps browse and download working anonymously", async () => {
+    installPbMock([]);
+    installFetchMock([publicMeta("pub"), lsRouter("pub", { docs: SAMPLE })]);
+
+    renderPublic("docs");
+
+    await screen.findByTestId("entry-0");
+    expect(screen.getByTestId("breadcrumbs")).toHaveTextContent("docs");
+    expect(screen.getByTestId("back")).toBeInTheDocument();
+  });
+
+  it("surfaces the not-available state with sign-in when access is cut", async () => {
+    installPbMock([]);
+    installFetchMock([
+      publicMeta("pub"),
+      lsRouter("pub", {
+        "": SAMPLE,
+        docs: jsonResponse(401, { message: "Authentication required." }),
+      }),
+    ]);
+
+    renderPublic();
+    await screen.findByTestId("entry-0");
+
+    await userEvent.setup().click(within(screen.getByTestId("entry-0")).getByTestId("open-dir"));
+
+    await waitFor(() => expect(screen.getByTestId("state-unavailable")).toBeInTheDocument());
+    await userEvent.setup().click(screen.getByTestId("action-signin"));
+    await waitFor(() => expect(screen.getByTestId("login-screen")).toBeInTheDocument());
+  });
+
+  it("previews anonymously and maps preview failures to not-available", async () => {
+    installPbMock([]);
+    installFetchMock([
+      publicMeta("pub"),
+      lsRouter("pub", { "": [entry("a.txt", { size: 10 })] }),
+    ]);
+
+    renderPublic("a.txt", true);
+
+    await waitFor(() => expect(screen.getByTestId("preview-download")).toBeInTheDocument());
+    expect(screen.getByTestId("preview-download")).toHaveAttribute("href", "/files/pub/a.txt");
+
+    // After the vdir stops being public, the same preview is not
+    // available rather than an unexplained error.
+    installFetchMock([
+      publicMeta("pub"),
+      lsRouter("pub", { "": jsonResponse(401, { message: "Authentication required." }) }),
+    ]);
+    renderPublic("a.txt", true);
+    await waitFor(() => expect(screen.getByTestId("state-unavailable")).toBeInTheDocument());
   });
 });

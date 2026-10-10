@@ -9,6 +9,7 @@ import {
   installFetchMock,
   installPbMock,
   jsonResponse,
+  type FetchRoute,
 } from "./test/mockApi";
 
 const OWNER = { id: "u1", email: "owner@stratofold.test" };
@@ -143,5 +144,84 @@ describe("locations grouping", () => {
     expect(screen.queryByTestId("connection-row")).not.toBeInTheDocument();
     // The Files list never mentions connections.
     expect(screen.getByTestId("connections-page")).not.toHaveTextContent(/connection record/i);
+  });
+});
+
+describe("anonymous public browsing gate", () => {
+  function publicMeta(vdirId: string, status: number): FetchRoute {
+    return (url) =>
+      url === `/api/sf/vdirs/${vdirId}/meta`
+        ? status === 200
+          ? jsonResponse(200, { name: "Public", is_public: true })
+          : jsonResponse(404, { message: "Not found." })
+        : undefined;
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+    pb.authStore.clear();
+  });
+
+  it("renders the public browse view for an anonymous visitor on a public vdir", async () => {
+    installPbMock([]);
+    installFetchMock([
+      publicMeta("pub", 200),
+      lsRoute("pub", "docs", [{ name: "a.txt", size: 3, dir: false, modtime: "2026-01-02T00:00:00Z" }]),
+    ]);
+
+    renderApp("/v/pub/docs");
+
+    await waitFor(() => expect(screen.getByTestId("entry-0")).toHaveTextContent("a.txt"));
+    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+  });
+
+  it("shows the login screen when the probed vdir is not public or unknown", async () => {
+    installPbMock([]);
+    installFetchMock([publicMeta("priv", 404)]);
+
+    renderApp("/v/priv");
+
+    await waitFor(() => expect(screen.getByLabelText("Email")).toBeInTheDocument());
+    expect(screen.queryByTestId("entry-0")).not.toBeInTheDocument();
+  });
+
+  it("shows the login screen for anonymous management destinations", async () => {
+    installPbMock([]);
+    installFetchMock([]);
+
+    for (const path of ["/v/pub/move", "/uploads", "/settings", "/files"]) {
+      const view = renderApp(path);
+      await waitFor(() => expect(screen.getByLabelText("Email")).toBeInTheDocument());
+      view.unmount();
+    }
+  });
+
+  it("offers no tab bar or sidebar destinations to an anonymous visitor", async () => {
+    installPbMock([]);
+    installFetchMock([
+      publicMeta("pub", 200),
+      lsRoute("pub", "", [{ name: "a.txt", size: 3, dir: false, modtime: "2026-01-02T00:00:00Z" }]),
+    ]);
+
+    renderApp("/v/pub");
+
+    await waitFor(() => expect(screen.getByTestId("entry-0")).toHaveTextContent("a.txt"));
+    expect(screen.queryByTestId("tab-bar")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("side-uploads")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tab-uploads")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("side-settings")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tab-settings")).not.toBeInTheDocument();
+  });
+
+  it("keeps signed-in flows unchanged on the same routes", async () => {
+    pb.authStore.save(fakeJwt(), OWNER as never);
+    installPbMock([authRefresh(OWNER), collectionList("vdirs", [MINE])]);
+    installFetchMock([lsRoute("v1", "", [])]);
+
+    renderApp("/v/v1");
+
+    await waitFor(() => expect(screen.getByTestId("tab-bar")).toBeInTheDocument());
+    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
   });
 });

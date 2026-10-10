@@ -24,7 +24,8 @@ import { useVdirRole } from "../lib/useVdirRole";
 import { Breadcrumbs } from "../components/Breadcrumbs";
 import { ContextMenu } from "../components/ContextMenu";
 import { DeleteAlert, MkdirSheet, RenameSheet } from "../components/FileOpsDialogs";
-import { EmptyState, FailureState, Spinner } from "../components/Errors";
+import { EmptyState, FailureState, Spinner, UnavailableState } from "../components/Errors";
+import { usePublicBrowseName } from "../components/PublicGate";
 import { EntryGrid, EntryList } from "../components/EntryViews";
 import { ChevronLeftIcon, FolderPlusIcon, GridIcon, ListIcon, SortIcon, UploadIcon } from "../components/icons";
 import type { ApiFailure } from "../lib/filesApi";
@@ -64,7 +65,12 @@ export function BrowsePage() {
   const [op, setOp] = useState<FileOp | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const { canWrite } = useVdirRole(vdir);
-  const vdirName = vdir?.name ?? "";
+  // Public mode (design D3): the anonymous browse view takes the
+  // vdir's name from the meta probe, skips the authenticated record
+  // API entirely, and can never write (vdir stays null → role none).
+  const publicName = usePublicBrowseName();
+  const publicMode = publicName !== null;
+  const vdirName = publicMode ? (publicName ?? "") : (vdir?.name ?? "");
 
   const currentName = useMemo(() => {
     const segs = path.split("/").filter(Boolean);
@@ -95,7 +101,7 @@ export function BrowsePage() {
 
   useEffect(() => {
     let cancelled = false;
-    if (!vdirId) return;
+    if (!vdirId || publicMode) return;
     void listVdirs()
       .then((all) => {
         if (!cancelled) setVdir(all.find((v) => v.id === vdirId) ?? null);
@@ -107,7 +113,7 @@ export function BrowsePage() {
     return () => {
       cancelled = true;
     };
-  }, [vdirId]);
+  }, [vdirId, publicMode]);
 
   const sorted = useMemo(() => sortEntries(entries, sortKey, sortDir), [entries, sortKey, sortDir]);
   const paths = useMemo(() => sorted.map((e) => joinPath(path, e.name)), [sorted, path]);
@@ -145,19 +151,33 @@ export function BrowsePage() {
     else void navigate(browseUrl(vdirId ?? "", parentPath(path)));
   };
 
+  // renderFailure maps the deterministic error classes into the
+  // public-mode not-available state (web-ui spec): once the vdir stops
+  // being public (401) or the path is gone (404), the anonymous
+  // visitor sees an explicit not-available state with the sign-in
+  // affordance instead of an unexplained error.
+  const renderFailure = (failure: ApiFailure) =>
+    publicMode && (failure.kind === "notfound" || failure.kind === "unauthorized") ? (
+      <UnavailableState onSignIn={() => void navigate("/")} />
+    ) : (
+      <FailureState failure={failure} onRetry={reload} />
+    );
+
   return (
     <div className="flex h-full flex-col">
       <div className="px-4 pt-1 pb-2">
         <div className="flex items-center justify-between">
-          <button
-            type="button"
-            data-testid="back"
-            onClick={goBack}
-            className="flex items-center text-base text-ios-blue"
-          >
-            <ChevronLeftIcon className="mr-0.5 text-sm" />
-            {path ? "Back" : "Files"}
-          </button>
+          {(!publicMode || path) && (
+            <button
+              type="button"
+              data-testid="back"
+              onClick={goBack}
+              className="flex items-center text-base text-ios-blue"
+            >
+              <ChevronLeftIcon className="mr-0.5 text-sm" />
+              {path ? "Back" : "Files"}
+            </button>
+          )}
           <span className="text-xs text-ios-secondary/50">SSH connected</span>
         </div>
         <h1 className="mt-0.5 text-[30px] font-bold leading-tight tracking-tight text-ios-label">
@@ -253,7 +273,7 @@ export function BrowsePage() {
         {loading ? (
           <Spinner label="Loading directory…" />
         ) : failure ? (
-          <FailureState failure={failure} onRetry={reload} />
+          renderFailure(failure)
         ) : sorted.length === 0 ? (
           <EmptyState title="This directory is empty" />
         ) : view === "list" ? (
