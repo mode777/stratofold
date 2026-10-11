@@ -119,19 +119,31 @@ see `docs/architecture.md`; finer details still follow.
   `./internal/fsapi/`.
 - **Web UI** (roadmap change 7): the SPA lives in the `web/` workspace
   (Vite + React + TS + Tailwind, ADR 0005) and is an iOS-style mobile
-  shell (ADR 0008): a translucent bottom tab bar below `md` and a
-  persistent sidebar at `md`+, with Files / Uploads / Settings
-   destinations. Routes: `/` → `/files` (Locations), `/v/:vdirId/*`
-  (browse), `/v/:vdirId/view/*` (preview — dispatched by file kind into
-  the in-app audio player, the in-app image viewer, or the Quick Look
-  metadata card), `/v/:vdirId/move` (move
-  picker), `/uploads`, `/settings`, `/settings/connections[/:id]`,
-  `/settings/vdirs[/:id[/sharing]]`; unknown routes show Page Not Found.
-  Tap behavior follows the file kind (`web/src/lib/entryKind.ts`):
-  audio opens the in-app player and images the in-app viewer (both
-  under `/v/:vdirId/view/*`, streaming the plain `/files` URL), video
-  still opens a new tab at `/files`. Download stays available in the
-  context menu for every file and inside the player and viewer.
+   shell (ADR 0008): a translucent bottom tab bar below `md` and a
+   persistent sidebar at `md`+, with Files / Uploads / Settings
+    destinations. Routes: `/` → `/files` (Locations), `/v/:vdirId/*`
+   (browse), `/v/:vdirId/view/*` (preview — dispatched by file kind into
+   the in-app audio player, the in-app fullscreen image gallery, or the Quick Look
+   metadata card), `/v/:vdirId/move` (move
+   picker), `/uploads`, `/settings`, `/settings/connections[/:id]`,
+   `/settings/vdirs[/:id[/sharing]]`; unknown routes show Page Not Found.
+   Tap behavior follows the file kind (`web/src/lib/entryKind.ts`):
+   audio opens the in-app player and images the in-app fullscreen
+   gallery (both
+   under `/v/:vdirId/view/*`, streaming the plain `/files` URL), video
+   still opens a new tab at `/files`. The image gallery
+   (`web/src/pages/ImageViewerPage.tsx`, change
+   `add-fullscreen-image-gallery`) is a dark edge-to-edge overlay: it
+   zooms (pinch + double-tap) and pans while zoomed, swipes (or arrow
+   keys) through the containing directory's image entries in listing
+   order stopping at the ends, navigates with `replace: true` so the
+   URL tracks the displayed image and browser back returns to the
+   browse listing, and hides/re-shows its overlay chrome (back, name,
+   size/modified, position, download) on image tap; slides fetch
+   through the object-URL pattern with a current±1 window and fall back
+   per slide (fetch failure → retry state, undecodable → metadata
+   card). Download stays available in the
+   context menu for every file and inside the player and gallery.
   The SPA is installable as a PWA (ADR 0009): `web/public/manifest.json`
   (served as `application/json`) and the committed icons under
   `web/public/icons/` are linked from `web/index.html`, Settings offers an
@@ -174,7 +186,8 @@ see `docs/architecture.md`; finer details still follow.
   anonymous-gate matrix in `web/src/App.test.tsx` and the public-mode
   browse/preview tests in `web/src/pages/BrowsePage.test.tsx`); E2E
   on the build server via `npm --prefix web run e2e` (`web/e2e/pwa.spec.ts`,
-  `web/e2e/public-browsing.spec.ts`, or the `SF_E2E_BASE_URL` override);
+  `web/e2e/public-browsing.spec.ts`, `web/e2e/image-gallery.spec.ts`, or the
+  `SF_E2E_BASE_URL` override);
   `go test ./internal/vdirmeta/ ./internal/userlookup/ ./internal/appserver/`.
 - **File management & uploads** (roadmap change 8): the browse view
   offers new-folder / rename / move / delete and multi-file upload,

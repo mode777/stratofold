@@ -4,8 +4,9 @@
 // the failure states (not-available in public mode, design D3 of
 // add-public-vdir-browsing) — and dispatches the body by file kind
 // (add-audio-player-image-viewer D1): audio to the in-app player,
-// images to the in-app viewer, everything else to the metadata card.
-// Video never lands here — it opens in a new tab at /files.
+// images to the in-app fullscreen gallery (add-fullscreen-image-gallery),
+// everything else to the metadata card. Video never lands here — it
+// opens in a new tab at /files.
 
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
@@ -36,39 +37,47 @@ export function PreviewPage() {
   const publicName = usePublicBrowseName();
   const publicMode = publicName !== null;
 
-  const [entry, setEntry] = useState<LsEntry | null>(null);
+  const dir = parentPath(path);
+  const name = path.split("/").filter(Boolean).pop() ?? "";
+
+  const [listing, setListing] = useState<LsEntry[] | null>(null);
   const [failure, setFailure] = useState<ApiFailure | null>(null);
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
 
-  const name = path.split("/").filter(Boolean).pop() ?? "";
-
+  // Pre-flight directory lookup, keyed by containing directory rather
+  // than full path (add-fullscreen-image-gallery 1.2): the gallery's
+  // swipe navigation replaces the path within the same directory and
+  // must not refetch the listing; a different directory (or a retry)
+  // still does.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    void ls(vdirId, parentPath(path))
+    setFailure(null);
+    setListing(null);
+    void ls(vdirId, dir)
       .then((found) => {
         if (cancelled) return;
-        const match = found.find((e) => e.name === name);
-        if (match) {
-          setEntry(match);
-          setFailure(null);
-        } else {
-          setFailure(toApiFailure(new Error("Not found.")));
-        }
+        setListing(found);
+        setLoading(false);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setFailure(toApiFailure(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setFailure(toApiFailure(err));
+          setLoading(false);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [vdirId, path, name, attempt]);
+  }, [vdirId, dir, attempt]);
 
-  const goBack = () => void navigate(browseUrl(vdirId, parentPath(path)));
+  // The entry derives from the held listing, so in-directory path
+  // changes resolve without any request; a path missing from the
+  // listing (deleted between fetch and render) is not-found.
+  const entry = useMemo(() => listing?.find((e) => e.name === name) ?? null, [listing, name]);
+
+  const goBack = () => void navigate(browseUrl(vdirId, dir));
 
   // The header stays across states (like BrowsePage's) — back must be
   // reachable even when the entry failed to load. pb-24 md:pb-0 keeps
@@ -97,18 +106,20 @@ export function PreviewPage() {
         <Spinner />
       </div>
     );
-  if (failure)
+  if (failure || !entry)
     return (
       <div data-testid="preview" className="flex min-h-dvh flex-col pb-24 md:pb-0">
         {header}
         {publicMode ? (
           <UnavailableState onSignIn={() => void navigate("/")} />
         ) : (
-          <FailureState failure={failure} onRetry={() => setAttempt((n) => n + 1)} />
+          <FailureState
+            failure={failure ?? toApiFailure(new Error("Not found."))}
+            onRetry={() => setAttempt((n) => n + 1)}
+          />
         )}
       </div>
     );
-  if (!entry) return null;
 
   const kind = entryKind(entry.name, entry.dir);
 
@@ -118,7 +129,7 @@ export function PreviewPage() {
       {kind === "audio" ? (
         <AudioPlayerPage vdirId={vdirId} path={path} />
       ) : kind === "image" ? (
-        <ImageViewerPage vdirId={vdirId} path={path} entry={entry} />
+        <ImageViewerPage vdirId={vdirId} path={path} entry={entry} listing={listing ?? []} />
       ) : (
         <MetadataCard vdirId={vdirId} path={path} entry={entry} />
       )}

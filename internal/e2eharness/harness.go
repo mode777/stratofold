@@ -215,10 +215,11 @@ func (s *Stack) seed(_ string) error {
 }
 
 // seedDataset writes the E2E files under root: a text file, a small
-// media file, a docs/ subdirectory, and a big/ directory with
+// media file, a docs/ subdirectory, a photos/ directory with several
+// images for the fullscreen gallery E2E, and a big/ directory with
 // BigDirCount entries (list virtualization).
 func seedDataset(root string) error {
-	for _, dir := range []string{root, filepath.Join(root, "docs"), filepath.Join(root, "big")} {
+	for _, dir := range []string{root, filepath.Join(root, "docs"), filepath.Join(root, "photos"), filepath.Join(root, "big")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
@@ -246,6 +247,17 @@ func seedDataset(root string) error {
 	}
 	if err := os.WriteFile(filepath.Join(root, "photo.png"), tinyPNG(), 0o644); err != nil {
 		return err
+	}
+	// photos/ feeds the fullscreen-gallery E2E flows: three decodable
+	// images among which the viewer swipes (listing order), plus a
+	// non-image entry the gallery must skip.
+	if err := os.WriteFile(filepath.Join(root, "photos", "notes.txt"), []byte("not an image\n"), 0o644); err != nil {
+		return err
+	}
+	for _, name := range []string{"one.png", "two.png", "three.png"} {
+		if err := os.WriteFile(filepath.Join(root, "photos", name), tinyPNG(), 0o644); err != nil {
+			return err
+		}
 	}
 	for i := 0; i < BigDirCount; i++ {
 		name := filepath.Join(root, "big", "file-"+pad(i)+".txt")
