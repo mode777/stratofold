@@ -30,8 +30,12 @@ type SlideState =
   | { status: "failed"; failure: ApiFailure }
   | { status: "undecodable" };
 
-// The settle animation duration; the page turn commits at its end.
+// The settle transition and the commit tick: the transition runs
+// first (started one style recalc after the state commit), the page
+// turn commits after it — at which point the strip swap is
+// pixel-identical, so no second animation is visible.
 const SETTLE_MS = 190;
+const TRANSITION_MS = 170;
 
 export function ImageViewerPage({
   vdirId,
@@ -250,10 +254,12 @@ export function ImageViewerPage({
       setDragX(0);
       return;
     }
-    // Animate the strip to the neighbor, then commit the page turn
-    // (replace-navigation keeps the URL on the displayed image, D4).
+    // Animate the strip the rest of the way to the neighbor — in the
+    // swipe direction (next = further left, prev = further right) —
+    // then commit the page turn (replace-navigation keeps the URL on
+    // the displayed image, D4).
     setSettling(true);
-    setDragX(intent * vw);
+    setDragX(-intent * vw);
     const token = settleToken.current;
     settleTimer.current = window.setTimeout(() => {
       if (settleToken.current !== token || pointers.current.size > 0) {
@@ -373,7 +379,11 @@ export function ImageViewerPage({
     );
   }
 
-  const stripTransition = dragging ? "none" : settling ? `transform ${SETTLE_MS}ms ease-out` : "none";
+  const stripTransition = dragging
+    ? "none"
+    : settling
+      ? `transform ${TRANSITION_MS}ms ease-out`
+      : "none";
 
   const slide = (rel: -1 | 0 | 1) => {
     const i = current + rel;

@@ -21,6 +21,16 @@ async function drag(page: Page, fromX: number, toX: number, y = 300) {
   await page.mouse.up();
 }
 
+// stripX reads the strip's animated horizontal offset (computed style).
+async function stripX(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const strip = document.querySelector("[data-testid='viewer-stage'] > div");
+    if (!strip) return 0;
+    const m = getComputedStyle(strip).transform;
+    return m.startsWith("matrix") ? parseFloat(m.split(",")[4]) : 0;
+  });
+}
+
 // openPhotos enters the seeded photos/ directory and returns the
 // gallery order: the directory's ls entries filtered to images.
 async function openPhotos(page: Page): Promise<string[]> {
@@ -76,6 +86,9 @@ test.describe("fullscreen image gallery", () => {
     await page.getByTestId("viewer-stage").dblclick();
     await expect(frame).toHaveAttribute("style", /scale\(1\)/);
     await drag(page, 900, 300);
+    // the settle animation continues leftward toward the next slide
+    // (regression: a sign flip sent the strip back across the screen)
+    await expect.poll(() => stripX(page), { timeout: 2_000 }).toBeLessThan(-700);
     await expect(frame).toHaveAttribute("alt", second);
     await expect(page.getByTestId("gallery-position")).toHaveText("2 / 3");
     await expect(page).toHaveURL(new RegExp(`/photos/${second}$`));
@@ -92,6 +105,8 @@ test.describe("fullscreen image gallery", () => {
     await page.keyboard.press("ArrowLeft");
     await expect(frame).toHaveAttribute("alt", second);
     await drag(page, 300, 900);
+    // the backward page settles rightward, past the release offset
+    await expect.poll(() => stripX(page), { timeout: 2_000 }).toBeGreaterThan(700);
     await drag(page, 300, 900);
     await expect(frame).toHaveAttribute("alt", first);
     await drag(page, 300, 900);

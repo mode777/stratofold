@@ -309,11 +309,17 @@ describe("ImageViewerPage gallery", () => {
   it("swipes to the neighboring images and stops at both ends", async () => {
     await openViewer();
 
+    const strip = () => screen.getByTestId("viewer-stage").firstElementChild as HTMLElement;
+
     await swipe(800, 200);
+    // the settle animation continues in the swipe direction (regression:
+    // a sign flip sent the strip back across the screen on release)
+    expect(strip().style.transform).toContain("translate3d(-1024px");
     await waitFor(() => expect(screen.getByTestId("image-frame")).toHaveAttribute("alt", "b.jpg"));
     expect(position()).toBe("2 / 3");
 
     await swipe(800, 200);
+    expect(strip().style.transform).toContain("translate3d(-1024px");
     await waitFor(() => expect(screen.getByTestId("image-frame")).toHaveAttribute("alt", "c.webp"));
     expect(position()).toBe("3 / 3");
 
@@ -322,9 +328,11 @@ describe("ImageViewerPage gallery", () => {
     expect(position()).toBe("3 / 3");
 
     await swipe(200, 800);
+    expect(strip().style.transform).toContain("translate3d(1024px");
     await waitFor(() => expect(screen.getByTestId("image-frame")).toHaveAttribute("alt", "b.jpg"));
 
     await swipe(200, 800);
+    expect(strip().style.transform).toContain("translate3d(1024px");
     await waitFor(() => expect(screen.getByTestId("image-frame")).toHaveAttribute("alt", "a.png"));
     expect(position()).toBe("1 / 3");
 
