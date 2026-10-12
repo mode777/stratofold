@@ -19,6 +19,12 @@ see `docs/architecture.md`; finer details still follow.
 - `openspec/config.yaml` — project context and per-artifact rules for the
   OpenSpec workflow.
 
+End-user docs (point, don't restate): `README.md` is the project front
+door; `docs/hosting.md` (hosting guide) and `docs/using-stratofold.md`
+(user guide) are written for self-hosters and app users. When a change
+alters user-facing behavior, re-check those three for drift — they cite
+the specs and files that own each fact.
+
 ## Development environment
 
 - **Go**: installed user-locally at `~/.local/go` in the dev container
