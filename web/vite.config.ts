@@ -15,6 +15,7 @@ export default defineConfig({
     proxy: {
       "/api": "http://127.0.0.1:8090",
       "/files": "http://127.0.0.1:8090",
+      "/s/": "http://127.0.0.1:8090",
     },
   },
   test: {

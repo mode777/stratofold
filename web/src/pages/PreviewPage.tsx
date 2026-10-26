@@ -20,6 +20,7 @@ import { usePublicBrowseName } from "../components/PublicGate";
 import { ChevronLeftIcon } from "../components/icons";
 import { AudioPlayerPage } from "./AudioPlayerPage";
 import { ImageViewerPage } from "./ImageViewerPage";
+import { VideoPlayerPage } from "./VideoPlayerPage";
 
 export function PreviewPage() {
   const { vdirId = "" } = useParams();
@@ -127,9 +128,11 @@ export function PreviewPage() {
     <div data-testid="preview" className="flex min-h-dvh flex-col pb-24 md:pb-0">
       {header}
       {kind === "audio" ? (
-        <AudioPlayerPage vdirId={vdirId} path={path} />
+        <AudioPlayerPage vdirId={vdirId} path={path} entry={entry} listing={listing ?? []} />
       ) : kind === "image" ? (
         <ImageViewerPage vdirId={vdirId} path={path} entry={entry} listing={listing ?? []} />
+      ) : kind === "video" ? (
+        <VideoPlayerPage vdirId={vdirId} path={path} entry={entry} />
       ) : (
         <MetadataCard vdirId={vdirId} path={path} entry={entry} />
       )}

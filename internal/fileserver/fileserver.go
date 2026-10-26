@@ -96,7 +96,7 @@ func handle(e *core.RequestEvent) error {
 	// (3) Sandbox resolution — may dial; lexical rejects, escapes and
 	// missing targets all surface as 404 (never a listing of what
 	// exists vs what is forbidden).
-	res, st, err := statResolved(ctx, e.App, vdirID, virtualPath)
+	res, st, err := StatResolved(ctx, e.App, vdirID, virtualPath)
 	if err != nil {
 		return e.NotFoundError("Not found", nil)
 	}
@@ -111,7 +111,7 @@ func handle(e *core.RequestEvent) error {
 		}
 		// index.html resolution; a directory without one is 404 —
 		// listing stays API-only.
-		res, st, err = statResolved(ctx, e.App, vdirID, path.Join(virtualPath, "index.html"))
+		res, st, err = StatResolved(ctx, e.App, vdirID, path.Join(virtualPath, "index.html"))
 		if err != nil || st.IsDir() {
 			return e.NotFoundError("Not found", nil)
 		}
@@ -122,12 +122,13 @@ func handle(e *core.RequestEvent) error {
 		return e.NotFoundError("Not found", nil)
 	}
 
-	return serveFile(e, ctx, res, st, serveName)
+	return ServeFile(e, ctx, res, st, serveName)
 }
 
-// statResolved resolves virtualPath through the sandbox and stats the
-// resolved remote path with one SFTP call.
-func statResolved(ctx context.Context, app core.App, vdirID, virtualPath string) (*vdir.Resolution, os.FileInfo, error) {
+// StatResolved resolves virtualPath through the sandbox and stats the
+// resolved remote path with one SFTP call. It is exported so the
+// temporary-link route shares the exact resolution behavior.
+func StatResolved(ctx context.Context, app core.App, vdirID, virtualPath string) (*vdir.Resolution, os.FileInfo, error) {
 	res, err := vdir.NewResolver(app).Resolve(ctx, vdirID, virtualPath)
 	if err != nil {
 		return nil, nil, err
@@ -144,9 +145,10 @@ func statResolved(ctx context.Context, app core.App, vdirID, virtualPath string)
 	return res, st, nil
 }
 
-// serveFile evaluates conditionals, computes headers, and streams the
-// byte window.
-func serveFile(e *core.RequestEvent, ctx context.Context, res *vdir.Resolution, st os.FileInfo, virtualName string) error {
+// ServeFile evaluates conditionals, computes headers, and streams the
+// byte window. The temporary-link route calls it for linked files; a
+// HEAD request stops after the headers (no SFTP read).
+func ServeFile(e *core.RequestEvent, ctx context.Context, res *vdir.Resolution, st os.FileInfo, virtualName string) error {
 	etag := entityTag(st)
 	h := e.Response.Header()
 	h.Set("Accept-Ranges", "bytes")
@@ -177,6 +179,9 @@ func serveFile(e *core.RequestEvent, ctx context.Context, res *vdir.Resolution, 
 
 	w := &countingWriter{w: e.Response}
 	e.Response.WriteHeader(status)
+	if e.Request.Method == http.MethodHead {
+		return nil
+	}
 
 	tr := sftpreadwrite.New(res.Provider, res.RemotePath, sftpreadwrite.Options{})
 	if _, err := tr.ReadRangeTo(ctx, w, start, length); err != nil || w.n != length {

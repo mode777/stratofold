@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
-import { ls, type LsEntry } from "../lib/filesApi";
+import { ls, mintFileLink, type LsEntry } from "../lib/filesApi";
 import {
   browseUrl,
   decodeSplat,
@@ -21,6 +21,7 @@ import {
 } from "../lib/listing";
 import { listVdirs, toApiFailure, type VdirRecord } from "../lib/records";
 import { uploadQueue } from "../lib/uploadQueue";
+import { useSession } from "../lib/session";
 import { useVdirRole } from "../lib/useVdirRole";
 import { Breadcrumbs } from "../components/Breadcrumbs";
 import { ContextMenu } from "../components/ContextMenu";
@@ -71,6 +72,11 @@ export function BrowsePage() {
   // API entirely, and can never write (vdir stays null → role none).
   const publicName = usePublicBrowseName();
   const publicMode = publicName !== null;
+  const { state: sessionState } = useSession();
+  const isPublicVdir = publicMode || vdir?.is_public === true;
+  // Temporary links are for signed-in readers of a non-public vdir;
+  // public vdirs keep the permanent Copy public link (design D11).
+  const canMintLink = sessionState === "authenticated" && vdir !== null && !isPublicVdir;
   const vdirName = publicMode ? (publicName ?? "") : (vdir?.name ?? "");
 
   const currentName = useMemo(() => {
@@ -145,6 +151,19 @@ export function BrowsePage() {
   const startMove = (entry: LsEntry, entryPath: string) => {
     setMenu(null);
     void navigate(`/v/${vdirId}/move`, { state: { entry, path: entryPath } });
+  };
+
+  // Mint then copy, returning whether the clipboard now holds the
+  // absolute link; failures stay in the menu and claim nothing.
+  const copyTemporaryLink = async (entryPath: string): Promise<boolean> => {
+    if (!vdirId) return false;
+    try {
+      const { url } = await mintFileLink(vdirId, entryPath);
+      await navigator.clipboard.writeText(`${window.location.origin}${url}`);
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   const goBack = () => {
@@ -281,7 +300,6 @@ export function BrowsePage() {
           <EmptyState title="This directory is empty" />
         ) : view === "list" ? (
           <EntryList
-            vdirId={vdirId ?? ""}
             entries={sorted}
             paths={paths}
             onOpenDir={openDir}
@@ -290,7 +308,6 @@ export function BrowsePage() {
           />
         ) : (
           <EntryGrid
-            vdirId={vdirId ?? ""}
             entries={sorted}
             paths={paths}
             onOpenDir={openDir}
@@ -306,6 +323,9 @@ export function BrowsePage() {
           entry={menu.entry}
           path={menu.path}
           canWrite={canWrite}
+          isPublic={isPublicVdir}
+          canMintLink={canMintLink}
+          onCopyTemporaryLink={copyTemporaryLink}
           onOpenDir={(p) => {
             setMenu(null);
             openDir(p);

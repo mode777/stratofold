@@ -2,6 +2,8 @@ import { Navigate, Outlet, Route, Routes, useLocation } from "react-router";
 import { SessionProvider, useSession } from "./lib/session";
 import { Spinner } from "./components/Errors";
 import { AppShell } from "./components/AppShell";
+import { CastIndicator } from "./components/CastIndicator";
+import { CastProvider } from "./lib/cast";
 import { PublicGate } from "./components/PublicGate";
 import { LoginPage } from "./pages/LoginPage";
 import { LocationsPage } from "./pages/LocationsPage";
@@ -20,7 +22,10 @@ import { NotFoundPage } from "./pages/NotFoundPage";
 export function App() {
   return (
     <SessionProvider>
-      <SessionGate />
+      <CastProvider>
+        <SessionGate />
+        <CastIndicator />
+      </CastProvider>
     </SessionProvider>
   );
 }

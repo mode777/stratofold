@@ -20,3 +20,22 @@ export function entryKind(name: string, dir = false): EntryKind {
   if (VIDEO.test(name)) return "video";
   return "other";
 }
+
+// videoContentType is the receiver-facing content type for the video
+// set (add-chromecast-playback): m4v is an MP4 container, ogv is Ogg.
+export function videoContentType(name: string): string {
+  const ext = name.toLowerCase().split(".").pop() ?? "";
+  switch (ext) {
+    case "mp4":
+    case "m4v":
+      return "video/mp4";
+    case "webm":
+      return "video/webm";
+    case "mov":
+      return "video/quicktime";
+    case "ogv":
+      return "video/ogg";
+    default:
+      return "application/octet-stream";
+  }
+}

@@ -6,8 +6,7 @@
 
 import { useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { filesUrl, type LsEntry } from "../lib/filesApi";
-import { entryKind } from "../lib/entryKind";
+import type { LsEntry } from "../lib/filesApi";
 import { formatModTime, formatSize } from "../lib/listing";
 import { entryVisual } from "./entryVisual";
 import { EllipsisIcon } from "./icons";
@@ -39,40 +38,23 @@ function useLongPress(onLongPress: () => void) {
 }
 
 function PrimaryTarget({
-  vdirId,
   entry,
   path,
   onOpenDir,
   onPreview,
 }: {
-  vdirId: string;
   entry: LsEntry;
   path: string;
   onOpenDir: (path: string) => void;
   onPreview: (entry: LsEntry, path: string) => void;
 }) {
   const cls = "flex min-w-0 flex-1 items-center gap-3 text-left";
-  const kind = entryKind(entry.name, entry.dir);
   if (entry.dir) {
     return (
       <button type="button" data-testid="open-dir" onClick={() => onOpenDir(path)} className={cls}>
         <EntryIcon entry={entry} />
         <EntryName entry={entry} />
       </button>
-    );
-  }
-  if (kind === "video") {
-    return (
-      <a
-        href={filesUrl(vdirId, path)}
-        target="_blank"
-        rel="noopener"
-        data-testid="open-media"
-        className={cls}
-      >
-        <EntryIcon entry={entry} />
-        <EntryName entry={entry} />
-      </a>
     );
   }
   return (
@@ -127,14 +109,12 @@ function ActionsButton({ entry, onMenu }: { entry: LsEntry; onMenu: () => void }
 }
 
 export function EntryList({
-  vdirId,
   entries,
   paths,
   onOpenDir,
   onPreview,
   onMenu,
 }: {
-  vdirId: string;
   entries: LsEntry[];
   paths: string[];
   onOpenDir: (path: string) => void;
@@ -164,7 +144,6 @@ export function EntryList({
               index={item.index}
               entry={entry}
               path={path}
-              vdirId={vdirId}
               onOpenDir={onOpenDir}
               onPreview={onPreview}
               onMenu={onMenu}
@@ -193,7 +172,6 @@ function EntryRow({
   index,
   entry,
   path,
-  vdirId,
   onOpenDir,
   onPreview,
   onMenu,
@@ -202,7 +180,6 @@ function EntryRow({
   index: number;
   entry: LsEntry;
   path: string;
-  vdirId: string;
   onOpenDir: (path: string) => void;
   onPreview: (entry: LsEntry, path: string) => void;
   onMenu: EntryMenuRequest;
@@ -217,7 +194,7 @@ function EntryRow({
       className="flex items-center gap-2 bg-ios-card px-4"
       {...longPress}
     >
-      <PrimaryTarget vdirId={vdirId} entry={entry} path={path} onOpenDir={onOpenDir} onPreview={onPreview} />
+      <PrimaryTarget entry={entry} path={path} onOpenDir={onOpenDir} onPreview={onPreview} />
       {!entry.dir && (
         <span
           data-testid="entry-size"
@@ -235,14 +212,12 @@ const GRID_COLUMNS = 3;
 const GRID_ROW_HEIGHT = 148;
 
 export function EntryGrid({
-  vdirId,
   entries,
   paths,
   onOpenDir,
   onPreview,
   onMenu,
 }: {
-  vdirId: string;
   entries: LsEntry[];
   paths: string[];
   onOpenDir: (path: string) => void;
@@ -287,7 +262,6 @@ export function EntryGrid({
                     index={index}
                     entry={entry}
                     path={path}
-                    vdirId={vdirId}
                     onOpenDir={onOpenDir}
                     onPreview={onPreview}
                     onMenu={onMenu}
@@ -308,7 +282,6 @@ function GridCell({
   index,
   entry,
   path,
-  vdirId,
   onOpenDir,
   onPreview,
   onMenu,
@@ -316,7 +289,6 @@ function GridCell({
   index: number;
   entry: LsEntry;
   path: string;
-  vdirId: string;
   onOpenDir: (path: string) => void;
   onPreview: (entry: LsEntry, path: string) => void;
   onMenu: EntryMenuRequest;
@@ -340,16 +312,6 @@ function GridCell({
         <button type="button" data-testid="open-dir" onClick={() => onOpenDir(path)} className={targetCls}>
           {body}
         </button>
-      ) : entryKind(entry.name) === "video" ? (
-        <a
-          href={filesUrl(vdirId, path)}
-          target="_blank"
-          rel="noopener"
-          data-testid="open-media"
-          className={targetCls}
-        >
-          {body}
-        </a>
       ) : (
         <button type="button" data-testid="open-preview" onClick={() => onPreview(entry, path)} className={targetCls}>
           {body}

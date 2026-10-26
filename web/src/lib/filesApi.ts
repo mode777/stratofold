@@ -225,3 +225,22 @@ export function filesUrl(vdirId: string, path: string): string {
     .map((s) => encodeURIComponent(s));
   return `/files/${encodeURIComponent(vdirId)}${segments.length ? "/" + segments.join("/") : ""}`;
 }
+
+export type FileLink = { url: string; expiresAt: string };
+
+// mintFileLink creates a session-free, 24-hour link for one file
+// (file-links capability) and returns its relative /s/<token> URL and
+// expiry. Failures map through the same ApiFailure classes as every
+// other /api/sf/ call.
+export async function mintFileLink(vdirId: string, path: string): Promise<FileLink> {
+  const resp = await sfFetch(`/api/sf/vdirs/${encodeURIComponent(vdirId)}/links`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  const data = (await resp.json()) as { url?: string; expires_at?: string };
+  if (!data.url || !data.expires_at) {
+    throw new ApiFailure("server", resp.status, "Invalid link response");
+  }
+  return { url: data.url, expiresAt: data.expires_at };
+}

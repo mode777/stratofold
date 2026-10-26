@@ -77,6 +77,11 @@ Covers what PocketBase cannot: operations against remote hosts.
   and detects its own already-applied state on retry; `rm` deletes
   recursively server-side, symlinks as links; deleting a missing path
   is idempotent success).
+- `POST /api/sf/vdirs/{id}/links` — mints a session-free, 24-hour link
+  for one file (`{"path": …}`); any signed-in reader of the vdir may
+  mint. The response is `{url: "/s/<token>", expires_at: …}` and the
+  plaintext token is shown only there. See the temporary-links
+  subsection below.
 - `POST /api/sf/vdirs/{id}/upload?path=…` — streams the request body
   straight to the SFTP writer (PocketBase's default request-body limit
   is unbound on this route); nothing is buffered on the Stratofold
@@ -120,6 +125,23 @@ holding a `viewer`/`editor` share (resolved per request against
 `vdirs` + `vdir_shares`, so revocation is immediate); public ones are
 served to everyone.
 
+### Temporary file links — `/s/*`
+
+`POST /api/sf/vdirs/{id}/links` creates a `file_links` row that grants
+read access to one virtual path for 24 hours, for consumers that cannot
+present the session cookie (a Chromecast receiver, a download tool). The
+token is 256 bits of cryptographic randomness stored only as a SHA-256
+hash; the plaintext appears once in the mint response. `GET`/`HEAD
+/s/<token>` is session-free, re-checks the creator's current
+`vdirauthz` read access on every request, resolves through the vdir
+sandbox, and serves with the same Range/conditional/reconnect paths as
+`/files` (`fileserver.StatResolved` + `fileserver.ServeFile`). Every
+failure is an indistinguishable `404`; responses are `no-store` with
+permissive CORS, and the token is redacted from the request log. An
+owner-created link survives un-publishing until expiry; a viewer's link
+ends when the share is removed. `/files` access rules are unchanged
+([ADR 0010](decisions/0010-expiring-file-links.md)).
+
 ### SSH connection manager
 
 Owns the lifecycle of SSH/SFTP connections, keyed by connection record:
@@ -147,10 +169,18 @@ React + Vite + TypeScript + Tailwind (ADR 0005), living in the `web/`
 workspace (`npm run web` / `web:build` / `web:test` / `web:e2e` from the
 repo root). It talks to PocketBase's API via the JS SDK for auth and
 records, to `/api/sf/*` for listings, and to `/files/*` via plain URLs
-(download links, media opened in a new tab). Mobile-first, responsive,
-Drive-like; no dedicated media player — media entries open their
-`/files` URL in a new browser tab and the browser's native player
-serves it via Range requests.
+(download links and the in-app audio/image/video players). Mobile-first,
+responsive, Drive-like; the media players stream their `/files` URL
+through the browser's native elements and Range requests. Video also
+keeps an open-in-new-tab action for the raw URL.
+
+Video playback can hand the stream to a Chromecast through the official
+Cast Web Sender SDK, loaded lazily when a video player opens. A root
+`CastProvider` owns the session across navigation and the in-app cast
+indicator; a signed-in cast mints a 24-hour `/s/<token>` link (ADR 0010)
+and an anonymous public cast uses the plain `/files` URL. The Default
+Media Receiver is used as-is (ADR 0011); the local player keeps the
+cookie-authenticated URL and pauses while the TV plays.
 
 The SPA is an **installable PWA with no offline capability** (ADR 0009):
 `web/public/manifest.json` (served as `application/json`) and the
@@ -198,6 +228,7 @@ in-app navigation only (see the Upload flow).
 | `connections` | owner, label, host, port, username, auth method (`password`\|`key`), password, private key, key passphrase, host-key fingerprint (optional), remote directory | owner-only CRUD via API rules; secrets sealed at rest (AES-256-GCM, key in `_params`) and absent from every API response; host key pinned when supplied, otherwise captured on first successful use (ADR 0007); `remote_dir` is a record-only default for new vdir root paths |
 | `vdirs` | owner, connection (rel), name, root path, is public | owner-only CRUD; reads (list/view) extend to users holding a share (back-relation rule, multi-match `?=`); a vdir must reference an own connection (rule-guarded on create and rebind); unique(owner, name); `is_public` grants anonymous read-only access |
 | `vdir_shares` | vdir (rel, cascade), user (rel, cascade), role (`viewer`/`editor`), unique(vdir, user) | owner-managed via API rules; the grantee sees their own shares; drives both the record-API read extension and the `/api/sf` + `/files` middleware |
+| `file_links` | vdir (rel, cascade), path (virtual), created_by (rel, cascade), token_hash (unique), expires_at | rows are created/read only by the custom mint and `/s/` routes; record rules are unset (superuser-only); tokens live only as a SHA-256 hash; fixed 24h expiry, creator access re-checked per redemption |
 
 Every path operation through a vdir goes through one internal seam:
 lexical anchoring under the vdir root, then a server-side walk that
@@ -250,10 +281,12 @@ cookie (consumed by `/files/*` and shareable download links).
 directory via `/api/sf/.../ls`, renders entries; every file is a plain
 `/files/...` URL.
 
-**Stream a video** — a media entry opens its
-`/files/<vdir-id>/movie.mp4` URL in a new browser tab; the browser's
-native player issues Range requests; each is served by an SFTP `ReadAt`
-at the requested offset.
+**Stream a video** — a video entry opens the in-app player at
+`/v/<vdir-id>/view/...`, which streams the file's plain
+`/files/<vdir-id>/movie.mp4` URL through a native video element; the
+element issues Range requests and each is served by an SFTP `ReadAt` at
+the requested offset. The context menu's open-in-new-tab action still
+reaches the raw URL in the browser's own player.
 
 **Upload** — the SPA's in-app upload manager queues selected files and
 streams each as a request body to `/api/sf/.../upload`, which writes to

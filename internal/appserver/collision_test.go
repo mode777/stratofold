@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/mode777/stratofold/internal/authbridge"
+	"github.com/mode777/stratofold/internal/filelinks"
 	"github.com/mode777/stratofold/internal/fileserver"
 	"github.com/mode777/stratofold/internal/fsapi"
 	"github.com/mode777/stratofold/internal/testapp"
@@ -47,6 +48,24 @@ func TestFilesRoutesStayOutsideEveryApiNamespace(t *testing.T) {
 		}
 		if !strings.HasPrefix(r.Path, "/files/") {
 			t.Errorf("/files route %s %s is not under /files/", r.Method, r.Path)
+		}
+	}
+}
+
+func TestFileLinksRouteNamespaces(t *testing.T) {
+	routes := filelinks.CustomRoutes()
+	if len(routes) == 0 {
+		t.Fatal("no file-link routes registered")
+	}
+	for _, r := range routes {
+		if strings.HasPrefix(r.Path, "/api/") {
+			if !strings.HasPrefix(r.Path, "/api/sf/") {
+				t.Errorf("file-link API route %s %s escaped /api/sf/", r.Method, r.Path)
+			}
+			continue
+		}
+		if !strings.HasPrefix(r.Path, "/s/") {
+			t.Errorf("file-link file route %s %s is not under /s/", r.Method, r.Path)
 		}
 	}
 }

@@ -83,6 +83,23 @@ docker run --rm -it -v stratofold-data:/pb_data \
   container is stopped and started again with the same volume
   ([deployment spec](../openspec/specs/deployment/spec.md): *"State
   survives a container restart"*).
+- **Temporary file links and `/s/`.** A 24-hour link is a bearer
+  credential for one file: anyone who gets the URL can download it until
+  it expires. The app redacts the token from its own request log, but a
+  reverse proxy sees the full path — redact or disable access logging for
+  `/s/`, and do not put the app behind a cache that stores those
+  responses. `/s/` streams exactly like `/files/`: disable proxy
+  buffering and preserve `Range` headers so seeking and long media
+  playback work. Links are fixed at 24 hours; there is no server setting
+  to change that today.
+- **Casting.** The in-app Cast button uses the Google-hosted Web Sender
+  SDK, so the sender page needs HTTPS and internet access to
+  `www.gstatic.com`; the Cast device must be able to reach the Stratofold
+  origin and trust its TLS certificate (a public CA, not an internal one).
+  A self-hosted instance on an internal CA or a LAN-only name cannot
+  cast. Casting is Chromium-only (no Safari/Firefox/iOS Chrome/AirPlay).
+  There is no server-side Cast setting; links minted for a cast follow the
+  24-hour `/s/` rules above.
 - **Shutdown is graceful.** On `SIGTERM` the server stops accepting new
   connections and lets in-flight requests finish or fail cleanly rather
   than silently truncating them

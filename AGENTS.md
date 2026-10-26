@@ -123,6 +123,19 @@ the specs and files that own each fact.
   Verification: `go test ./internal/migrations/` (record-rules matrix)
   and the authz/revocation matrices in `./internal/fileserver/` +
   `./internal/fsapi/`.
+- **Temporary file links** (change `add-expiring-file-links`):
+  `POST /api/sf/vdirs/<vdir-id>/links` mints a 24-hour, one-file,
+  session-free `/s/<token>` URL for any signed-in reader (owner, viewer,
+  or editor); `GET`/`HEAD /s/<token>` streams through the vdir sandbox
+  with the `/files` Range/conditional/reconnect path. Tokens are 256-bit
+  random values stored only as a SHA-256 hash, the creator's `vdirauthz`
+  read access is re-checked on every redemption, responses are
+  `no-store` with permissive CORS, and the token is redacted from
+  PocketBase's request log. `/files` access rules are unchanged. The
+  browse context menu offers **Copy 24-hour link** to signed-in readers
+  on non-public vdirs; public vdirs keep **Copy public link**. See ADR
+  0010. Verification: `go test ./internal/filelinks/` (mint/redemption/
+  expiry/revocation/header/log-redaction matrices).
 - **Web UI** (roadmap change 7): the SPA lives in the `web/` workspace
   (Vite + React + TS + Tailwind, ADR 0005) and is an iOS-style mobile
    shell (ADR 0008): a translucent bottom tab bar below `md` and a
@@ -134,10 +147,19 @@ the specs and files that own each fact.
    picker), `/uploads`, `/settings`, `/settings/connections[/:id]`,
    `/settings/vdirs[/:id[/sharing]]`; unknown routes show Page Not Found.
    Tap behavior follows the file kind (`web/src/lib/entryKind.ts`):
-   audio opens the in-app player and images the in-app fullscreen
-   gallery (both
-   under `/v/:vdirId/view/*`, streaming the plain `/files` URL), video
-   still opens a new tab at `/files`. The image gallery
+   audio opens the in-app player, images the in-app fullscreen gallery,
+   and video the in-app video player (`web/src/pages/VideoPlayerPage.tsx`,
+   change `add-video-player`) — all under `/v/:vdirId/view/*`, streaming
+   the plain `/files` URL; the video context menu keeps an Open in new
+   tab action for the raw `/files` URL. The video player exposes
+   play/pause, seek with elapsed/remaining time, volume/mute,
+   fullscreen, and download, and shows a retry state on stream failure.
+   The audio player
+   (`web/src/pages/AudioPlayerPage.tsx`, change
+   `add-audio-playlist-navigation`) queues the containing folder's audio
+   entries in listing order with wrapping previous/next, auto-advances
+   at track end, and uses the folder's first image entry as cover art.
+   The image gallery
    (`web/src/pages/ImageViewerPage.tsx`, change
    `add-fullscreen-image-gallery`) is a dark edge-to-edge overlay: it
    zooms (pinch + double-tap) and pans while zoomed, swipes (or arrow
@@ -149,7 +171,31 @@ the specs and files that own each fact.
    through the object-URL pattern with a current±1 window and fall back
    per slide (fetch failure → retry state, undecodable → metadata
    card). Download stays available in the
-   context menu for every file and inside the player and gallery.
+   context menu for every file and inside the player and gallery; on a
+   public vdir a file's context menu also offers **Copy public link**
+   (the absolute `/files` URL, no token), while on a non-public vdir a
+   signed-in reader instead offers **Copy 24-hour link** (mints and
+   copies the absolute `/s/<token>` URL); directories never do.
+  **Casting** (change `add-chromecast-playback`): the video player's Cast
+  button uses the official Google Cast Web Sender SDK, loaded lazily when
+  a video player opens (`web/src/lib/cast.tsx`: `CastProvider`/`useCast`;
+  a pre-installed `cast.framework` short-circuits the load for tests).
+  It connects with `chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID` (the
+  Default Media Receiver; no custom receiver app). Casting is
+  session-first: a signed-in user mints a fresh 24-hour `/s/<token>` link,
+  an anonymous public visitor uses the plain absolute `/files` URL; the
+  local `<video>` never carries the token and pauses while the TV plays.
+  A root provider keeps the session across navigation and
+  `CastIndicator` shows the device with the in-app Stop. The action is
+  absent in unsupported environments (non-Chromium, insecure context,
+  blocked SDK); failures (no device, mint, receiver load/decode) are
+  explicit. Casting needs HTTPS, the gstatic script, and a
+  receiver-reachable origin with a publicly trusted certificate; the
+  browser's own media-hub Cast of a non-public `/files` URL is
+  unsupported. Verification: the fake-SDK unit/component suites,
+  `web/e2e/chromecast.spec.ts` (stub SDK + real mint + cookieless fetch)
+  on the verification server, and the manual real-device checklist (no TV
+  in CI). See ADR 0011.
   The SPA is installable as a PWA (ADR 0009): `web/public/manifest.json`
   (served as `application/json`) and the committed icons under
   `web/public/icons/` are linked from `web/index.html`, Settings offers an
@@ -157,8 +203,8 @@ the specs and files that own each fact.
   (`web/src/lib/useInstallPrompt.ts`), and there is deliberately **no
   service worker and no offline behavior**.
   Root script shims are
-  `npm run web` (dev server on 127.0.0.1:5173, proxying `/api` + `/files`
-  to 127.0.0.1:8090), `web:build` (output `web/dist`), `web:test`
+  `npm run web` (dev server on 127.0.0.1:5173, proxying `/api`, `/files`,
+  and `/s` to 127.0.0.1:8090), `web:build` (output `web/dist`), `web:test`
   (Vitest + Testing Library), `web:e2e` (Playwright). Login posts to
   `/api/sf/auth`; the token goes into the PocketBase SDK auth store
   (record API) and the `sf_session` cookie drives `/files/*`. A new

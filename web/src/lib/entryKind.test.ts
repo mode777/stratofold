@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { entryKind } from "./entryKind";
+import { entryKind, videoContentType } from "./entryKind";
 
 describe("entryKind", () => {
   it("classifies directories before extensions", () => {
@@ -59,5 +59,17 @@ describe("entryKind", () => {
     expect(entryKind("archive.zip")).toBe("other");
     expect(entryKind("README")).toBe("other");
     expect(entryKind("trailingdot.")).toBe("other");
+  });
+});
+
+describe("videoContentType", () => {
+  it("maps the video set to receiver content types", () => {
+    expect(videoContentType("movie.mp4")).toBe("video/mp4");
+    expect(videoContentType("clip.m4v")).toBe("video/mp4");
+    expect(videoContentType("clip.webm")).toBe("video/webm");
+    expect(videoContentType("clip.ogv")).toBe("video/ogg");
+    expect(videoContentType("clip.mov")).toBe("video/quicktime");
+    expect(videoContentType("MOVIE.MP4")).toBe("video/mp4");
+    expect(videoContentType("notes.txt")).toBe("application/octet-stream");
   });
 });

@@ -18,11 +18,13 @@ multi-gigabyte transfers are ordinary.
 - **Virtual directories** — pick a folder on any SSH host and it becomes
   one clean, browsable root in the app.
 - **Sharing** — grant another user read (`viewer`) or write (`editor`)
-  access per directory, or make a directory public for anyone with its
-  link. Access is re-checked on every request; revocation is immediate.
+  access per directory, make a directory public for anyone with its link,
+  or hand out a 24-hour link to one file. Access is re-checked on every
+  request; revocation is immediate.
 - **Stream, don't cache** — downloads, media playback, and uploads all
   stream to and from the SSH source; uploads publish atomically and
-  survive connection drops.
+  survive connection drops, and videos can be cast to a Chromecast
+  through the Default Media Receiver.
 - **A real file server** — range requests, resumable downloads, and
   in-app previews for audio, images, and video.
 - **One self-contained image** — the Go server embeds the web app; one

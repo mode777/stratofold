@@ -1,10 +1,15 @@
 // Long-press / ellipsis context menu (web-ui spec): role-gated entry
 // actions in an iOS action menu. Open and Download for everyone —
 // open leads in-app (player for audio, viewer for images, Quick Look
-// for other files); only video opens in a new tab. Rename/Move/Delete
-// are writer-only.
+// for other files). Video also keeps a separate open-in-new-tab action
+// for the raw /files URL. On a public vdir a
+// file offers Copy public link: the absolute /files URL that already
+// downloads it anonymously (no token; un-publishing revokes it). On a
+// non-public vdir, a signed-in reader instead offers Copy 24-hour link,
+// which mints a session-free /s/<token> URL (add-expiring-file-links).
+// Rename/Move/Delete are writer-only.
 
-import { useEffect, type ReactElement, type ReactNode } from "react";
+import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { filesUrl, type LsEntry } from "../lib/filesApi";
 import { entryKind } from "../lib/entryKind";
@@ -12,6 +17,7 @@ import {
   ChevronRightIcon,
   DownloadIcon,
   FolderIcon,
+  LinkIcon,
   PencilIcon,
   TrashIcon,
   type IconProps,
@@ -43,18 +49,32 @@ function MenuItem({
   const inner: ReactNode = (
     <>
       <span>{label}</span>
-      <Icon className={destructive ? "text-ios-red" : "text-ios-secondary/50"} />
+      <Icon
+        className={destructive ? "text-ios-red" : "text-ios-secondary/50"}
+      />
     </>
   );
   if (href) {
     return (
-      <a href={href} target={target} rel={target ? "noopener" : undefined} download={download} data-testid={testid} className={cls}>
+      <a
+        href={href}
+        target={target}
+        rel={target ? "noopener" : undefined}
+        download={download}
+        data-testid={testid}
+        className={cls}
+      >
         {inner}
       </a>
     );
   }
   return (
-    <button type="button" onClick={onClick} data-testid={testid} className={cls}>
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testid}
+      className={cls}
+    >
       {inner}
     </button>
   );
@@ -65,6 +85,9 @@ export function ContextMenu({
   path,
   vdirId,
   canWrite,
+  isPublic = false,
+  canMintLink = false,
+  onCopyTemporaryLink,
   onOpenDir,
   onPreview,
   onRename,
@@ -76,6 +99,9 @@ export function ContextMenu({
   path: string;
   vdirId: string;
   canWrite: boolean;
+  isPublic?: boolean;
+  canMintLink?: boolean;
+  onCopyTemporaryLink?: (path: string) => Promise<boolean>;
   onOpenDir?: (path: string) => void;
   onPreview?: (entry: LsEntry, path: string) => void;
   onRename: (entry: LsEntry, path: string) => void;
@@ -83,6 +109,9 @@ export function ContextMenu({
   onDelete: (entry: LsEntry, path: string) => void;
   onClose: () => void;
 }) {
+  const [copied, setCopied] = useState(false);
+  const [tempCopied, setTempCopied] = useState(false);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -95,6 +124,31 @@ export function ContextMenu({
   const kind = entryKind(entry.name, entry.dir);
   const visual = entryVisual(entry);
 
+  // The link is the absolute form of the Download URL, so it works
+  // outside this tab (design D2). Success is claimed only when the
+  // clipboard write settles; an unavailable or rejected clipboard
+  // leaves the row unchanged (design D4).
+  const copyPublicLink = async () => {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}${url}`);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  // The temporary-link mint/copy is owned by the page (it has the
+  // session and vdir context); the menu only reflects the outcome and
+  // never claims success on its own.
+  const copyTemporaryLink = async () => {
+    if (!onCopyTemporaryLink) return;
+    try {
+      setTempCopied((await onCopyTemporaryLink(path)) === true);
+    } catch {
+      setTempCopied(false);
+    }
+  };
+
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex flex-col justify-end bg-black/40 p-4 pb-12 backdrop-blur-sm"
@@ -103,11 +157,15 @@ export function ContextMenu({
     >
       <div onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center gap-3 rounded-2xl border border-black/10 bg-ios-card p-4 shadow-2xl">
-          <span className={`flex h-10 w-10 items-center justify-center rounded-xl text-lg ${visual.tone}`}>
+          <span
+            className={`flex h-10 w-10 items-center justify-center rounded-xl text-lg ${visual.tone}`}
+          >
             <visual.Icon />
           </span>
           <span className="min-w-0">
-            <span className="block truncate text-base font-bold text-ios-label">{entry.name}</span>
+            <span className="block truncate text-base font-bold text-ios-label">
+              {entry.name}
+            </span>
             <span className="block text-xs text-ios-secondary/60">
               {entry.dir
                 ? "Folder"
@@ -127,10 +185,21 @@ export function ContextMenu({
           className="mb-3 divide-y divide-ios-separator overflow-hidden rounded-2xl border border-black/10 bg-ios-card/95 text-base shadow-xl backdrop-blur"
         >
           {entry.dir ? (
-            <MenuItem label="Open" testid="action-open" Icon={ChevronRightIcon} onClick={() => onOpenDir?.(path)} />
+            <MenuItem
+              label="Open"
+              testid="action-open"
+              Icon={ChevronRightIcon}
+              onClick={() => onOpenDir?.(path)}
+            />
           ) : (
             <>
-              {kind === "video" ? (
+              <MenuItem
+                label="Open"
+                testid="action-open"
+                Icon={ChevronRightIcon}
+                onClick={() => onPreview?.(entry, path)}
+              />
+              {kind === "video" && (
                 <MenuItem
                   label="Open in new tab"
                   testid="action-open-tab"
@@ -138,22 +207,57 @@ export function ContextMenu({
                   href={url}
                   target="_blank"
                 />
-              ) : (
-                <MenuItem
-                  label="Open"
-                  testid="action-open"
-                  Icon={ChevronRightIcon}
-                  onClick={() => onPreview?.(entry, path)}
-                />
               )}
-              <MenuItem label="Download" testid="action-download" Icon={DownloadIcon} href={url} download />
+              <MenuItem
+                label="Download"
+                testid="action-download"
+                Icon={DownloadIcon}
+                href={url}
+                download
+              />
             </>
+          )}
+          {/* Public file link (design D3): files only — a folder URL
+              streams a listing, and the vdir browse link covers that. */}
+          {!entry.dir && isPublic && (
+            <MenuItem
+              label={copied ? "Copied" : "Copy public link"}
+              testid="action-copy-public-link"
+              Icon={LinkIcon}
+              onClick={() => void copyPublicLink()}
+            />
+          )}
+          {/* Non-public vdirs offer the minted 24-hour link instead
+              (design D11); public vdirs keep the permanent link. */}
+          {!entry.dir && canMintLink && onCopyTemporaryLink && (
+            <MenuItem
+              label={tempCopied ? "Copied" : "Copy 24-hour link"}
+              testid="action-copy-temp-link"
+              Icon={LinkIcon}
+              onClick={() => void copyTemporaryLink()}
+            />
           )}
           {canWrite && (
             <>
-              <MenuItem label="Rename…" testid="action-rename" Icon={PencilIcon} onClick={() => onRename(entry, path)} />
-              <MenuItem label="Move…" testid="action-move" Icon={FolderIcon} onClick={() => onMove(entry, path)} />
-              <MenuItem label="Delete" testid="action-delete" Icon={TrashIcon} destructive onClick={() => onDelete(entry, path)} />
+              <MenuItem
+                label="Rename…"
+                testid="action-rename"
+                Icon={PencilIcon}
+                onClick={() => onRename(entry, path)}
+              />
+              <MenuItem
+                label="Move…"
+                testid="action-move"
+                Icon={FolderIcon}
+                onClick={() => onMove(entry, path)}
+              />
+              <MenuItem
+                label="Delete"
+                testid="action-delete"
+                Icon={TrashIcon}
+                destructive
+                onClick={() => onDelete(entry, path)}
+              />
             </>
           )}
         </div>

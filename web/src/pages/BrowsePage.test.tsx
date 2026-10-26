@@ -6,6 +6,7 @@ import { BrowsePage } from "./BrowsePage";
 import { PreviewPage } from "./PreviewPage";
 import { MovePickerPage } from "./MovePickerPage";
 import { PublicGate } from "../components/PublicGate";
+import { CastProvider } from "../lib/cast";
 import { pb } from "../lib/pb";
 import { collectionList, installFetchMock, installPbMock, jsonResponse, type FetchRoute } from "../test/mockApi";
 import type { LsEntry } from "../lib/filesApi";
@@ -42,14 +43,16 @@ function lsRouter(vdirId: string, byPath: Record<string, LsEntry[] | Response>) 
 
 function renderBrowse(path = "") {
   return render(
-    <MemoryRouter initialEntries={[`/v/v1${path ? "/" + path : ""}`]}>
-      <Routes>
-        <Route path="/v/:vdirId/view/*" element={<PreviewPage />} />
-        <Route path="/v/:vdirId/move" element={<MovePickerPage />} />
-        <Route path="/v/:vdirId/*" element={<BrowsePage />} />
-        <Route path="/files" element={<div>files destination</div>} />
-      </Routes>
-    </MemoryRouter>,
+    <CastProvider loadSdk={async () => null}>
+      <MemoryRouter initialEntries={[`/v/v1${path ? "/" + path : ""}`]}>
+        <Routes>
+          <Route path="/v/:vdirId/view/*" element={<PreviewPage />} />
+          <Route path="/v/:vdirId/move" element={<MovePickerPage />} />
+          <Route path="/v/:vdirId/*" element={<BrowsePage />} />
+          <Route path="/files" element={<div>files destination</div>} />
+        </Routes>
+      </MemoryRouter>
+    </CastProvider>,
   );
 }
 
@@ -217,7 +220,7 @@ describe("virtualization", () => {
 });
 
 describe("downloads, media, and preview", () => {
-  it("wires video to a new tab, audio to the in-app player, and previews other files", async () => {
+  it("wires video and audio to their in-app players and previews other files", async () => {
     installPbMock([collectionList("vdirs", [MINE])]);
     installFetchMock([
       lsRouter("v1", {
@@ -227,13 +230,15 @@ describe("downloads, media, and preview", () => {
     const view = renderBrowse();
     await screen.findByTestId("entry-0");
 
-    // Video keeps the new-tab native player.
+    // Video opens the in-app player on the preview route.
     const movieRow = screen.getByText("movie.mp4").closest("[data-testid^='entry-']") as HTMLElement;
-    const movieLink = within(movieRow).getByTestId("open-media");
-    expect(movieLink).toHaveAttribute("href", "/files/v1/movie.mp4");
-    expect(movieLink).toHaveAttribute("target", "_blank");
+    await userEvent.setup().click(within(movieRow).getByTestId("open-preview"));
+    await waitFor(() => expect(screen.getByTestId("video-player")).toBeInTheDocument());
+    expect(screen.getByTestId("video-stream")).toHaveAttribute("src", "/files/v1/movie.mp4");
+    await userEvent.setup().click(screen.getByTestId("back"));
+    await waitFor(() => expect(screen.getByTestId("entry-0")).toBeInTheDocument());
 
-    // Audio opens the in-app player instead of a new tab.
+    // Audio opens the in-app player too.
     const songRow = screen.getByText("song.mp3").closest("[data-testid^='entry-']") as HTMLElement;
     await userEvent.setup().click(within(songRow).getByTestId("open-preview"));
 
@@ -251,7 +256,7 @@ describe("downloads, media, and preview", () => {
     notesView.unmount();
   });
 
-  it("dispatches the view route by kind: audio to the player, image to the viewer", async () => {
+  it("dispatches the view route by kind: audio, image, and video get their in-app views", async () => {
     Object.defineProperty(URL, "createObjectURL", {
       configurable: true,
       writable: true,
@@ -264,7 +269,9 @@ describe("downloads, media, and preview", () => {
     });
     installPbMock([collectionList("vdirs", [MINE])]);
     installFetchMock([
-      lsRouter("v1", { "": [entry("song.mp3", { size: 5 }), entry("hero.png", { size: 9 })] }),
+      lsRouter("v1", {
+        "": [entry("song.mp3", { size: 5 }), entry("hero.png", { size: 9 }), entry("movie.mp4", { size: 99 })],
+      }),
       (url: string) => (url === "/files/v1/hero.png" ? jsonResponse(200, { ok: true }) : undefined),
     ]);
 
@@ -279,6 +286,11 @@ describe("downloads, media, and preview", () => {
     expect(screen.getByTestId("image-frame")).toHaveAttribute("alt", "hero.png");
     expect(screen.getByTestId("preview-download")).toHaveAttribute("href", "/files/v1/hero.png");
     imageView.unmount();
+
+    const videoView = renderBrowse("view/movie.mp4");
+    await waitFor(() => expect(screen.getByTestId("video-player")).toBeInTheDocument());
+    expect(screen.getByTestId("video-stream")).toHaveAttribute("src", "/files/v1/movie.mp4");
+    videoView.unmount();
   });
 
   it("returns from the preview to the containing directory at any depth", async () => {
@@ -341,6 +353,34 @@ describe("downloads, media, and preview", () => {
     expect(download).toHaveAttribute("href", "/files/v1/a.txt");
     expect(download).toHaveAttribute("download");
   });
+
+  it("offers Copy public link for files on a public vdir", async () => {
+    installPbMock([collectionList("vdirs", [{ ...MINE, is_public: true }])]);
+    installFetchMock([lsRouter("v1", { "": SAMPLE })]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+
+    await openMenu("a.txt");
+    const copy = await screen.findByTestId("action-copy-public-link");
+
+    const user = userEvent.setup();
+    await user.click(copy);
+    expect(copy).toHaveTextContent("Copied");
+    await expect(navigator.clipboard.readText()).resolves.toBe(
+      `${window.location.origin}/files/v1/a.txt`,
+    );
+  });
+
+  it("offers no Copy public link on a non-public vdir", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    installFetchMock([lsRouter("v1", { "": SAMPLE })]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+
+    await openMenu("a.txt");
+    expect(await screen.findByTestId("context-menu")).toBeInTheDocument();
+    expect(screen.queryByTestId("action-copy-public-link")).not.toBeInTheDocument();
+  });
 });
 
 type OpCall = { op: string; body: Record<string, unknown> };
@@ -369,6 +409,18 @@ function countingLs(vdirId: string, byPath: Record<string, LsEntry[] | Response>
   return { route, count: () => count };
 }
 
+function mintRouter(
+  vdirId: string,
+  response: () => Response,
+  calls: Record<string, unknown>[] = [],
+) {
+  return (url: string, init?: RequestInit) => {
+    if (url !== `/api/sf/vdirs/${vdirId}/links` || init?.method !== "POST") return undefined;
+    calls.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+    return response();
+  };
+}
+
 function rowFor(name: string): HTMLElement {
   return screen.getByText(name).closest("[data-testid^='entry-']") as HTMLElement;
 }
@@ -376,6 +428,93 @@ function rowFor(name: string): HTMLElement {
 async function openMenu(name: string) {
   await userEvent.setup().click(within(rowFor(name)).getByTestId("entry-actions"));
 }
+
+describe("temporary links", () => {
+  it("mints and copies the absolute 24-hour link on a non-public vdir", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    const calls: Record<string, unknown>[] = [];
+    installFetchMock([
+      mintRouter("v1", () => jsonResponse(201, { url: "/s/tok123", expires_at: "2026-10-27T19:00:00Z" }), calls),
+      lsRouter("v1", { "": SAMPLE }),
+    ]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+
+    await openMenu("a.txt");
+    const copy = await screen.findByTestId("action-copy-temp-link");
+    expect(screen.queryByTestId("action-copy-public-link")).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(copy);
+    expect(copy).toHaveTextContent("Copied");
+    await expect(navigator.clipboard.readText()).resolves.toBe(
+      `${window.location.origin}/s/tok123`,
+    );
+    expect(calls).toEqual([{ path: "a.txt" }]);
+  });
+
+  it("keeps the temporary link for a signed-in viewer", async () => {
+    sessionState.userId = "u2";
+    installPbMock([
+      collectionList("vdirs", [MINE]),
+      collectionList("vdir_shares", [{ id: "s1", vdir: "v1", user: "u2", role: "viewer" }]),
+    ]);
+    installFetchMock([
+      mintRouter("v1", () => jsonResponse(201, { url: "/s/tok123", expires_at: "2026-10-27T19:00:00Z" })),
+      lsRouter("v1", { "": SAMPLE }),
+    ]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+
+    await openMenu("a.txt");
+    expect(await screen.findByTestId("action-copy-temp-link")).toBeInTheDocument();
+    expect(screen.queryByTestId("action-rename")).not.toBeInTheDocument();
+  });
+
+  it("offers no temporary link on a public vdir", async () => {
+    installPbMock([collectionList("vdirs", [{ ...MINE, is_public: true }])]);
+    installFetchMock([lsRouter("v1", { "": SAMPLE })]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+
+    await openMenu("a.txt");
+    expect(await screen.findByTestId("action-copy-public-link")).toBeInTheDocument();
+    expect(screen.queryByTestId("action-copy-temp-link")).not.toBeInTheDocument();
+  });
+
+  it("does not claim success when the mint fails", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    installFetchMock([
+      mintRouter("v1", () => jsonResponse(403, { message: "Forbidden" })),
+      lsRouter("v1", { "": SAMPLE }),
+    ]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+
+    await openMenu("a.txt");
+    const copy = await screen.findByTestId("action-copy-temp-link");
+    await userEvent.setup().click(copy);
+    expect(copy).toHaveTextContent("Copy 24-hour link");
+    expect(screen.getByTestId("action-download")).toBeInTheDocument();
+  });
+
+  it("does not claim success when the clipboard write rejects", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    installFetchMock([
+      mintRouter("v1", () => jsonResponse(201, { url: "/s/tok123", expires_at: "2026-10-27T19:00:00Z" })),
+      lsRouter("v1", { "": SAMPLE }),
+    ]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+
+    await openMenu("a.txt");
+    const copy = await screen.findByTestId("action-copy-temp-link");
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValueOnce(new Error("denied"));
+    await userEvent.setup().click(copy);
+    expect(copy).toHaveTextContent("Copy 24-hour link");
+    expect(screen.getByTestId("action-download")).toBeInTheDocument();
+  });
+});
 
 describe("file management actions", () => {
   it("offers header write actions to the owner, above the breadcrumbs, with a view-only toolbar", async () => {
@@ -617,13 +756,15 @@ describe("anonymous public mode", () => {
   function renderPublic(path = "", view = false) {
     const tail = view ? `/view${path ? "/" + path : ""}` : path ? "/" + path : "";
     return render(
-      <MemoryRouter initialEntries={[`/v/pub${tail}`]}>
-        <Routes>
-          <Route path="/v/:vdirId/view/*" element={<PublicGate><PreviewPage /></PublicGate>} />
-          <Route path="/v/:vdirId/*" element={<PublicGate><BrowsePage /></PublicGate>} />
-          <Route path="/" element={<div data-testid="login-screen">login</div>} />
-        </Routes>
-      </MemoryRouter>,
+      <CastProvider loadSdk={async () => null}>
+        <MemoryRouter initialEntries={[`/v/pub${tail}`]}>
+          <Routes>
+            <Route path="/v/:vdirId/view/*" element={<PublicGate><PreviewPage /></PublicGate>} />
+            <Route path="/v/:vdirId/*" element={<PublicGate><BrowsePage /></PublicGate>} />
+            <Route path="/" element={<div data-testid="login-screen">login</div>} />
+          </Routes>
+        </MemoryRouter>
+      </CastProvider>,
     );
   }
 
@@ -661,9 +802,21 @@ describe("anonymous public mode", () => {
     await userEvent.setup().click(within(screen.getByTestId("entry-2")).getByTestId("entry-actions"));
     await waitFor(() => expect(screen.getByTestId("context-menu")).toBeInTheDocument());
     expect(screen.getByTestId("action-download")).toBeInTheDocument();
+    expect(screen.getByTestId("action-copy-public-link")).toBeInTheDocument();
+    expect(screen.queryByTestId("action-copy-temp-link")).not.toBeInTheDocument();
     expect(screen.queryByTestId("action-rename")).not.toBeInTheDocument();
     expect(screen.queryByTestId("action-move")).not.toBeInTheDocument();
     expect(screen.queryByTestId("action-delete")).not.toBeInTheDocument();
+  });
+
+  it("opens the in-app video player anonymously", async () => {
+    installPbMock([]);
+    installFetchMock([publicMeta("pub"), lsRouter("pub", { "": [entry("movie.mp4", { size: 99 })] })]);
+
+    renderPublic("movie.mp4", true);
+
+    await waitFor(() => expect(screen.getByTestId("video-player")).toBeInTheDocument());
+    expect(screen.getByTestId("video-stream")).toHaveAttribute("src", "/files/pub/movie.mp4");
   });
 
   it("keeps browse and download working anonymously", async () => {

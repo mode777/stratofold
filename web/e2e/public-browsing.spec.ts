@@ -40,6 +40,21 @@ test.describe("public browsing", () => {
     await expect(anonPage.getByTestId("breadcrumbs")).toContainText("docs");
     await expect(anonPage.getByText("readme.md")).toBeVisible();
 
+    // A file's context menu offers its direct public link, and the
+    // copied URL downloads the file with no session (web-ui
+    // add-public-file-link).
+    await anon.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await anonPage.locator('[data-entry-name="readme.md"]').getByTestId("entry-actions").click();
+    await expect(anonPage.getByTestId("context-menu")).toBeVisible();
+    await anonPage.getByTestId("action-copy-public-link").click();
+    await expect(anonPage.getByTestId("action-copy-public-link")).toHaveText("Copied");
+    const fileLink = await anonPage.evaluate(() => navigator.clipboard.readText());
+    expect(new URL(fileLink).pathname).toBe(`/files/${pubId}/docs/readme.md`);
+    const linked = await anonPage.request.get(new URL(fileLink).pathname);
+    expect(linked.status()).toBe(200);
+    expect(await linked.text()).toBe("# docs\n");
+    await anonPage.getByTestId("context-dismiss").click();
+
     // No write affordances and no management destinations.
     await expect(anonPage.getByTestId("new-folder")).toHaveCount(0);
     await expect(anonPage.getByTestId("upload-button")).toHaveCount(0);

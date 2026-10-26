@@ -4,6 +4,7 @@ import {
   UploadCanceled,
   filesUrl,
   ls,
+  mintFileLink,
   mkdir,
   mv,
   rm,
@@ -85,6 +86,44 @@ describe("filesUrl", () => {
     expect(filesUrl("abc123", "")).toBe("/files/abc123");
     expect(filesUrl("abc123", "docs/sub/a b.txt")).toBe("/files/abc123/docs/sub/a%20b.txt");
     expect(filesUrl("abc123", "weird%20name")).toBe("/files/abc123/weird%2520name");
+  });
+});
+
+describe("mintFileLink", () => {
+  it("posts the path and parses the relative URL and expiry", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe("/api/sf/vdirs/v1/links");
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({ path: "docs/a.txt" });
+      return jsonResponse(201, { url: "/s/tok123", expires_at: "2026-10-27T19:00:00Z" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(mintFileLink("v1", "docs/a.txt")).resolves.toEqual({
+      url: "/s/tok123",
+      expiresAt: "2026-10-27T19:00:00Z",
+    });
+  });
+
+  it.each([
+    [401, "unauthorized"],
+    [403, "forbidden"],
+    [404, "notfound"],
+    [503, "retryable"],
+    [400, "rejected"],
+    [500, "server"],
+  ] as const)("maps %i to kind %s", async (status, kind) => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(status, { message: "boom" })));
+    const err = await mintFileLink("v1", "a.txt").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiFailure);
+    expect((err as ApiFailure).kind).toBe(kind);
+  });
+
+  it("rejects a malformed success body", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(201, { url: "/s/x" })));
+    const err = await mintFileLink("v1", "a.txt").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiFailure);
+    expect((err as ApiFailure).kind).toBe("server");
   });
 });
 

@@ -19,6 +19,8 @@ directory holds only what stays true after a change is archived.
 | 0007 | Accepted | Optional pinned host key with trust on first use |
 | 0008 | Accepted | iOS-style mobile-first SPA shell and design system |
 | 0009 | Accepted | Installable PWA with no offline capability |
+| 0010 | Accepted | Expiring capability links for session-less file access |
+| 0011 | Accepted | Chromecast via the Web Sender SDK and the Default Media Receiver |
 
 ## Adding a decision
 

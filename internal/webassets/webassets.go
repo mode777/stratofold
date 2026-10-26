@@ -35,7 +35,7 @@ func init() {
 
 // reservedPrefixes are server-owned namespaces the SPA must never
 // answer for: a miss there is a server 404, not the SPA shell.
-var reservedPrefixes = []string{"/api", "/files", "/_"}
+var reservedPrefixes = []string{"/api", "/files", "/s", "/_"}
 
 // RegisterRoutes mounts the SPA catch-all at the site root. It is
 // registered after the API routes so those (more specific patterns)

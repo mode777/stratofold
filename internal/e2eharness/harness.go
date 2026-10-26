@@ -216,10 +216,11 @@ func (s *Stack) seed(_ string) error {
 
 // seedDataset writes the E2E files under root: a text file, a small
 // media file, a docs/ subdirectory, a photos/ directory with several
-// images for the fullscreen gallery E2E, and a big/ directory with
-// BigDirCount entries (list virtualization).
+// images for the fullscreen gallery E2E, an album/ directory for the
+// audio queue E2E, and a big/ directory with BigDirCount entries (list
+// virtualization).
 func seedDataset(root string) error {
-	for _, dir := range []string{root, filepath.Join(root, "docs"), filepath.Join(root, "photos"), filepath.Join(root, "big")} {
+	for _, dir := range []string{root, filepath.Join(root, "docs"), filepath.Join(root, "photos"), filepath.Join(root, "album"), filepath.Join(root, "big")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
@@ -258,6 +259,20 @@ func seedDataset(root string) error {
 		if err := os.WriteFile(filepath.Join(root, "photos", name), tinyPNG(), 0o644); err != nil {
 			return err
 		}
+	}
+	// album/ feeds the audio-queue E2E flows: two playable 1-second
+	// tracks, a decodable cover image (first image in listing order),
+	// and a non-audio entry the queue must skip.
+	for _, name := range []string{"01-intro.wav", "02-theme.wav"} {
+		if err := os.WriteFile(filepath.Join(root, "album", name), tinyWAV(), 0o644); err != nil {
+			return err
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "album", "cover.png"), tinyPNG(), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(root, "album", "notes.txt"), []byte("not audio\n"), 0o644); err != nil {
+		return err
 	}
 	for i := 0; i < BigDirCount; i++ {
 		name := filepath.Join(root, "big", "file-"+pad(i)+".txt")

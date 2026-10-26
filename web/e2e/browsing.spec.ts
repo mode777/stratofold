@@ -4,7 +4,16 @@
 // a media file, docs/, and a 10k-entry big/ directory.
 
 import { expect, test } from "@playwright/test";
-import { GRANTEE, OWNER, entryRow, login, logout, nav, openHome, openSharing } from "./helpers";
+import {
+  GRANTEE,
+  OWNER,
+  entryRow,
+  login,
+  logout,
+  nav,
+  openHome,
+  openSharing,
+} from "./helpers";
 
 test.describe("browsing", () => {
   test("login → browse → download", async ({ page }) => {
@@ -35,7 +44,10 @@ test.describe("browsing", () => {
     await page.getByTestId("open-dir").filter({ hasText: "docs" }).click();
     await expect(page.getByTestId("breadcrumbs")).toContainText("docs");
     await expect(page.getByText("readme.md")).toBeVisible();
-    await page.getByTestId("breadcrumbs").getByRole("link", { name: "Home" }).click();
+    await page
+      .getByTestId("breadcrumbs")
+      .getByRole("link", { name: "Home" })
+      .click();
     await expect(page.getByText("hello.txt")).toBeVisible();
 
     // Sort by size descending, then switch to grid.
@@ -47,7 +59,9 @@ test.describe("browsing", () => {
     await expect(page.getByTestId("entry-0")).toBeVisible();
   });
 
-  test("a 10k-entry directory stays virtualized and reaches the last entry", async ({ page }) => {
+  test("a 10k-entry directory stays virtualized and reaches the last entry", async ({
+    page,
+  }) => {
     await login(page, OWNER);
     await openHome(page);
 
@@ -65,45 +79,49 @@ test.describe("browsing", () => {
     await expect(page.getByText("file-09999.txt")).toBeVisible();
   });
 
-  test("media opens in a new tab and /files serves Range requests", async ({ page, context }) => {
-    const ranges: string[] = [];
-    context.on("request", (req) => {
-      if (req.url().includes("/files/") && req.url().includes("movie.mp4")) {
-        const range = req.headers()["range"];
-        if (range) ranges.push(range);
-      }
-    });
-
+  test("video opens in the in-app player and /files serves Range requests", async ({
+    page,
+  }) => {
     await login(page, OWNER);
     await openHome(page);
 
-    const [popup] = await Promise.all([
-      page.waitForEvent("popup"),
-      page.getByTestId("open-media").first().click(),
-    ]);
-    await popup.waitForLoadState("domcontentloaded");
-    expect(popup.url()).toContain("/files/");
-    expect(popup.url()).toContain("movie.mp4");
+    await entryRow(page, "movie.mp4").getByTestId("open-preview").click();
+    await expect(page.getByTestId("video-player")).toBeVisible();
+    await expect(page.getByTestId("video-stream")).toHaveAttribute(
+      "src",
+      /\/files\/[^/]+\/movie\.mp4$/,
+    );
+    await expect(page.getByTestId("video-play")).toBeVisible();
 
-    const movieUrl = popup.url();
-    const first = await popup.evaluate(async (url) => {
+    const movieUrl = await page.getByTestId("video-stream").getAttribute("src");
+    expect(movieUrl).toBeTruthy();
+    const first = await page.evaluate(async (url) => {
       const resp = await fetch(url, { headers: { Range: "bytes=0-9" } });
-      return { status: resp.status, len: (await resp.arrayBuffer()).byteLength };
-    }, movieUrl);
+      return {
+        status: resp.status,
+        len: (await resp.arrayBuffer()).byteLength,
+      };
+    }, movieUrl!);
     expect(first.status).toBe(206);
     expect(first.len).toBe(10);
 
-    const seek = await popup.evaluate(async (url) => {
+    const seek = await page.evaluate(async (url) => {
       const resp = await fetch(url, { headers: { Range: "bytes=10-19" } });
-      return { status: resp.status, len: (await resp.arrayBuffer()).byteLength };
-    }, movieUrl);
+      return {
+        status: resp.status,
+        len: (await resp.arrayBuffer()).byteLength,
+      };
+    }, movieUrl!);
     expect(seek.status).toBe(206);
     expect(seek.len).toBe(10);
 
-    expect(ranges.length).toBeGreaterThan(0);
+    await page.getByTestId("back").click();
+    await expect(entryRow(page, "movie.mp4")).toBeVisible();
   });
 
-  test("share grant, grantee access, and immediate revocation", async ({ page }) => {
+  test("share grant, grantee access, and immediate revocation", async ({
+    page,
+  }) => {
     // Owner grants viewer to the grantee.
     await login(page, OWNER);
     await openSharing(page);
@@ -128,7 +146,9 @@ test.describe("browsing", () => {
 
     await logout(page);
     await login(page, GRANTEE);
-    await expect(page.getByTestId("group-shared-with-me")).toContainText("Nothing shared with you");
+    await expect(page.getByTestId("group-shared-with-me")).toContainText(
+      "Nothing shared with you",
+    );
   });
 
   test("logout ends the session", async ({ page }) => {
@@ -146,7 +166,10 @@ test.describe("responsive and keyboard", () => {
     await login(page, OWNER);
 
     await expect(page.getByTestId("tab-bar")).toBeVisible();
-    await page.getByTestId("group-my-vdirs").getByRole("button", { name: /Home/ }).click();
+    await page
+      .getByTestId("group-my-vdirs")
+      .getByRole("button", { name: /Home/ })
+      .click();
     await expect(page.getByTestId("entry-0")).toBeVisible();
     await nav(page, "files");
     await expect(page.getByTestId("locations")).toBeVisible();

@@ -324,6 +324,44 @@ export function PauseIcon(props: IconProps) {
   );
 }
 
+export function VolumeIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 9v6h4l5 4V5L8 9H4z" />
+      <path d="M17 9a4 4 0 0 1 0 6" />
+      <path d="M19.5 6.5a8 8 0 0 1 0 11" />
+    </Svg>
+  );
+}
+
+export function MuteIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 9v6h4l5 4V5L8 9H4z" />
+      <path d="M17 9l4 6M21 9l-4 6" />
+    </Svg>
+  );
+}
+
+export function FullscreenIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5" />
+    </Svg>
+  );
+}
+
+export function CastIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M3 5h18v14h-6" />
+      <path d="M3 15a6 6 0 0 1 6 6" />
+      <path d="M3 11a10 10 0 0 1 10 10" />
+      <path d="M3 19a2 2 0 0 1 2 2" />
+    </Svg>
+  );
+}
+
 export function ServerIcon(props: IconProps) {
   return (
     <Svg {...props}>

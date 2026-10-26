@@ -13,6 +13,7 @@ import (
 
 	"github.com/mode777/stratofold/internal/authbridge"
 	"github.com/mode777/stratofold/internal/connreg"
+	"github.com/mode777/stratofold/internal/filelinks"
 	"github.com/mode777/stratofold/internal/fileserver"
 	"github.com/mode777/stratofold/internal/fsapi"
 	// app migrations (connections/vdirs collections) register on import.
@@ -83,6 +84,8 @@ func Install(app core.App, opts Options) {
 
 		authbridge.RegisterRoutes(se.Router.RouterGroup)
 		fileserver.RegisterRoutes(se.Router.RouterGroup,
+			&hook.Handler[*core.RequestEvent]{Func: ClearStreamDeadlines()})
+		filelinks.RegisterRoutes(se.Router.RouterGroup,
 			&hook.Handler[*core.RequestEvent]{Func: ClearStreamDeadlines()})
 		fsapi.RegisterRoutes(se.Router.RouterGroup,
 			&hook.Handler[*core.RequestEvent]{Func: ClearStreamDeadlines()})

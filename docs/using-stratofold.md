@@ -86,16 +86,48 @@ shared with you under "Shared with me"; public vdirs carry a marker
 What tapping a file opens depends on its kind
 ([web-ui spec](../openspec/specs/web-ui/spec.md)):
 
-- **Audio** opens the in-app player (play/pause, scrubber, ±15s skip);
-  it streams from the SSH host as you listen.
+- **Audio** opens the in-app player (play/pause, scrubber, ±15s skip,
+  and previous/next across the folder's tracks in listing order, wrapping
+  at the ends). It plays straight through the folder — the next track
+  starts when one finishes — and shows the folder's first image as cover
+  art when there is one; it streams from the SSH host as you listen.
 - **Images** open a fullscreen viewer: pinch or double-tap to zoom, pan
   while zoomed, swipe (or arrow keys) to move through the folder's
   images in listing order.
-- **Video** opens in a new browser tab with the browser's native player,
-  seeking via HTTP range requests.
+- **Video** opens the in-app video player: play/pause, a scrubber with
+  elapsed/remaining time, volume/mute, fullscreen, and a download action.
+  It streams the file straight from the SSH host and seeks via HTTP range
+  requests. The context menu still offers **Open in new tab** when you
+  want the browser's native player or a format the app cannot decode.
 - **Everything else** opens a metadata card (name, size, modified) with
   a download action. An image the browser cannot decode (e.g. HEIC)
   falls back to that card too.
+
+### Cast a video to a TV
+
+In a Chromium browser over HTTPS, the video player's Cast button sends the
+video to a Chromecast or Google Cast device using the **Default Media
+Receiver** — no receiver app has to be installed:
+
+- Pick a device; playback moves to the TV, local playback pauses, and a
+  **Casting to <device>** indicator appears with a **Stop** action. The
+  cast keeps running while you browse other screens.
+- A signed-in user casts through a fresh 24-hour link for that one file.
+  An anonymous visitor of a public vdir uses the plain public file URL.
+  The link expires after 24 hours (or earlier if the creator loses
+  access); un-publishing a public vdir does not cut a signed-in user's
+  cast link.
+- The browser must be Chromium (desktop, Android, or Edge) on a secure
+  context, the Google Cast SDK script must be reachable, and the TV must
+  be able to reach the Stratofold origin with a certificate it trusts.
+  Casting is not available in Safari, Firefox, or iOS Chrome; AirPlay is
+  not supported here.
+- MP4 and WebM are the expected containers; MOV/OGV and some codecs may
+  be rejected by the device with an explicit error. The app does not
+  transcode.
+- The browser's own "Cast" control on a video element does not work for
+  a non-public vdir (it sends the cookie-protected `/files` URL); use the
+  in-app Cast button.
 
 ## Uploads
 
@@ -127,6 +159,16 @@ by the grantee's exact registered email, as `viewer` or `editor`
   (`/v/<vdir-id>`) with a copy action. The link carries no token:
   revoking public access is the vdir's public toggle, and un-publishing
   cuts anonymous access on the next request.
+- While a vdir is public, any file in it also offers **Copy public
+  link** in the browse view's context menu — a direct link to that one
+  file's download, no surrounding folder needed.
+- On a vdir that is **not** public, a file's context menu offers
+  **Copy 24-hour link** to anyone signed in who can read the vdir. It
+  mints a temporary link that downloads only that one file without a
+  sign-in and expires after 24 hours. Removing the creator's share (or
+  deleting the vdir) ends their links on the next request; an owner's
+  links keep working if the vdir is un-published. There is no link
+  manager yet — mint a new link if you need to copy one again.
 
 ## Public browsing
 
@@ -135,6 +177,11 @@ preview, and download — the same read-only experience a signed-in
 viewer gets, with no write or management controls and no app
 destinations. If the vdir stops being public, the visitor's next action
 says so explicitly.
+
+Every file's context menu also offers **Copy public link**, which puts
+that file's absolute `/files` URL on the clipboard. It carries no
+token: it downloads the file only while the vdir is public, exactly like
+the vdir's browse link.
 
 ## Install as an app
 

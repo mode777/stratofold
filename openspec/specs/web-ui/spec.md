@@ -186,30 +186,71 @@ session cookie alone and are resumable via HTTP Range.
 - **WHEN** a user holding a `viewer` share downloads a file from the shared vdir
 - **THEN** the download succeeds through the same `/files` URL without any owner-only step
 
-### Requirement: Media files open in a new tab through /files URLs
+### Requirement: Video entries open the in-app video player
 
-The SPA SHALL open video and other non-audio media entries (e.g. mp4,
-mov, webm, ogv) in a new browser tab at their plain
-`/files/<vdir-id>/<virtual-path>` URL — the browser's native player
-serves playback through HTTP Range requests and is not replaced by a
-dedicated in-app player; no auth token appears in the URL. Audio
-entries are excluded from this requirement: they open the in-app audio
-player.
+The SPA SHALL open a video entry (classified by file extension) at
+`/v/<vdir-id>/view/<virtual-path>` in an in-app video player instead of a
+new browser tab. The player SHALL stream the file's plain
+`/files/<vdir-id>/<virtual-path>` URL through a native video element,
+cookie-authenticated with no auth token in the URL, and SHALL start
+paused until the user plays it.
 
-#### Scenario: Media entry opens a new tab
+#### Scenario: Tapping a video opens the player
 
-- **WHEN** the user activates a video entry (tap or context-menu open)
-- **THEN** a new browser tab opens at the file's `/files` URL and the browser's native player takes over
+- **WHEN** the user activates a video entry by tap, grid tile, or the context menu's Open action
+- **THEN** the in-app video player opens for that file without leaving the SPA and no new tab is opened
 
-#### Scenario: Native playback is served by Range requests
+#### Scenario: Playback starts only on user action
 
-- **WHEN** media plays in the opened tab
-- **THEN** the network log shows Range requests (`206`) against the file's `/files` URL
+- **WHEN** the player opens
+- **THEN** playback is paused until the user activates play
 
-#### Scenario: Seeking issues further Range requests
+#### Scenario: Local playback uses the plain /files URL
 
-- **WHEN** the user seeks within playing media in the opened tab
-- **THEN** a new Range request at the seek offset is issued and playback continues from there
+- **WHEN** the player streams the video
+- **THEN** the request targets the file's `/files` URL with no token in it and the browser's Range requests (`206`) serve seeking
+
+#### Scenario: The raw file stays reachable in a new tab
+
+- **WHEN** the user chooses open in new tab from the context menu of a video entry
+- **THEN** a new browser tab opens at the file's `/files` URL
+
+#### Scenario: Anonymous visitor plays video on a public vdir
+
+- **WHEN** a visitor without a session opens a public vdir's video entry
+- **THEN** the player renders and streams through the public `/files` URL without a login prompt
+
+### Requirement: The in-app video player exposes transport controls
+
+The player SHALL offer play/pause, a position scrubber with elapsed and
+remaining time, volume/mute, fullscreen, a download action, and the
+preview screen's back control, and SHALL show a retryable failure state
+when the stream fails.
+
+#### Scenario: Controls drive the video element
+
+- **WHEN** the user toggles play/pause, seeks, changes volume, or enters fullscreen
+- **THEN** the video element's state follows the control and the scrubber and times track playback
+
+#### Scenario: Scrubbing seeks by Range requests
+
+- **WHEN** the user moves the scrubber to an unbuffered position
+- **THEN** the video element issues a Range request at that offset against the file's `/files` URL and playback continues from there
+
+#### Scenario: Player exposes download
+
+- **WHEN** the user activates the download action inside the player
+- **THEN** the browser retrieves the file byte-exactly through the same `/files` URL
+
+#### Scenario: Back returns to the listing
+
+- **WHEN** the user activates the player's back control
+- **THEN** the browse listing of the file's containing directory is shown
+
+#### Scenario: Stream failure shows an explicit failure state
+
+- **WHEN** the video stream fails (connection dropped, file removed, or undecodable container)
+- **THEN** a failure state with a retry action is shown and playback does not silently hang
 
 ### Requirement: Connections are manageable in the UI
 
@@ -491,42 +532,122 @@ reachable from every authenticated screen.
 
 The SPA SHALL open a context menu on long-press of a file or directory
 entry, SHALL offer Open and Download for every entry, SHALL offer media
-files an open-in-new-tab action, and SHALL offer Rename, Move, and
-Delete only to writers (owner or `editor` share); the same actions SHALL
-be reachable without a pointer.
+files an open-in-new-tab action, SHALL offer Copy public link for file
+entries while the browsed vdir is public, SHALL offer Copy 24-hour link
+for file entries on a non-public vdir to signed-in readers, and SHALL
+offer Rename, Move, and Delete only to writers (owner or `editor` share);
+the same actions SHALL be reachable without a pointer.
 
 #### Scenario: Writer sees the full menu
 
 - **WHEN** an owner or editor long-presses an entry
-- **THEN** Open, Download, Rename, Move, and Delete are offered, and a media file also offers open-in-new-tab
+- **THEN** Open, Download, Rename, Move, and Delete are offered, a media file also offers open-in-new-tab, a file on a public vdir also offers Copy public link, and a file on a non-public vdir also offers Copy 24-hour link
 
 #### Scenario: Viewer sees a read-only menu
 
-- **WHEN** a viewer or public browser long-presses an entry
-- **THEN** only Open and Download are offered (open-in-new-tab for media), with no write action
+- **WHEN** a viewer long-presses an entry on a non-public vdir
+- **THEN** only Open, Download for files, and Copy 24-hour link for files are offered, with no write action
+
+#### Scenario: Public browser sees a read-only menu
+
+- **WHEN** an anonymous visitor long-presses an entry on a public vdir
+- **THEN** only Open, Download for files, and Copy public link for files are offered, with no write action and no Copy 24-hour link
 
 #### Scenario: Actions are keyboard reachable
 
 - **WHEN** the user focuses an entry without a pointer
 - **THEN** the entry's actions can be opened and activated by keyboard
 
-### Requirement: Non-media files open a preview screen
+### Requirement: Public vdirs offer a direct file link
 
-The SPA SHALL open a preview screen for a non-media file entry showing
-its name, size, and modification time derived from the directory
-listing, and SHALL offer a download action; media files SHALL continue
-to open in a new tab at their `/files` URL rather than in the preview
-screen.
+While the browsed vdir is public, the SPA SHALL offer a copy action on a
+file entry that places an absolute, direct `/files/<vdir-id>/<virtual-path>`
+URL on the clipboard. The URL SHALL carry no token and SHALL grant nothing
+beyond the vdir's anonymous read access. The action SHALL NOT be offered on
+a non-public vdir or for a directory entry.
+
+#### Scenario: Copies the file's direct URL
+
+- **WHEN** a visitor of a public vdir chooses Copy public link on a file entry
+- **THEN** the clipboard holds the absolute URL of that file's `/files` address, percent-encoded per path segment, with no token
+
+#### Scenario: Any viewer of a public vdir may copy
+
+- **WHEN** the owner, a share holder, or an anonymous visitor browses a public vdir
+- **THEN** every file entry offers Copy public link
+
+#### Scenario: Non-public vdirs offer no link action
+
+- **WHEN** any user long-presses a file entry on a vdir that is not public
+- **THEN** no Copy public link action is offered
+
+#### Scenario: Directories offer no link action
+
+- **WHEN** any user long-presses a directory entry on a public vdir
+- **THEN** no Copy public link action is offered
+
+#### Scenario: Clipboard failure is not reported as success
+
+- **WHEN** the clipboard write rejects or the clipboard API is unavailable
+- **THEN** the SPA does not claim the link was copied and the menu stays usable
+
+### Requirement: Signed-in readers can copy a 24-hour file link
+
+On a non-public vdir, the SPA SHALL offer a copy action on file entries to
+signed-in readers that mints a temporary link and places its absolute
+`/s/<token>` URL on the clipboard, and SHALL state that the link expires
+after 24 hours. It SHALL NOT offer the action on a public vdir, to an
+anonymous visitor, or for a directory entry. It SHALL claim success only
+after the mint and clipboard write succeed.
+
+#### Scenario: A reader copies a temporary link
+
+- **WHEN** the owner, an editor, or a viewer copies the 24-hour link of a file on a non-public vdir
+- **THEN** the clipboard holds the absolute `/s/<token>` URL and the menu states the 24-hour validity
+
+#### Scenario: Public vdirs keep the permanent link
+
+- **WHEN** a user opens the menu of a file on a public vdir
+- **THEN** Copy public link is offered and Copy 24-hour link is not
+
+#### Scenario: Anonymous visitors cannot mint links
+
+- **WHEN** an anonymous visitor opens the menu of a file on a public vdir
+- **THEN** no Copy 24-hour link action is offered
+
+#### Scenario: Directories offer no temporary link
+
+- **WHEN** any user opens the menu of a directory entry
+- **THEN** no Copy 24-hour link action is offered
+
+#### Scenario: Mint failure is not reported as success
+
+- **WHEN** the mint request fails or is rejected
+- **THEN** the menu does not claim the link was copied and stays usable
+
+#### Scenario: Clipboard failure is not reported as success
+
+- **WHEN** the clipboard write rejects or is unavailable
+- **THEN** the menu does not claim the link was copied and stays usable
+
+### Requirement: Files without an in-app view open a preview screen
+
+The SPA SHALL open a preview screen for a file entry that has no in-app
+player or viewer (currently files other than audio, images, and video),
+showing its name, size, and modification time derived from the directory
+listing and offering a download action. Audio, image, and video entries
+SHALL open their respective in-app player or viewer instead of the
+metadata-only preview.
 
 #### Scenario: Preview shows listed metadata
 
-- **WHEN** the user activates a non-media file entry
+- **WHEN** the user activates a file entry without an in-app view
 - **THEN** a preview screen shows the file's name, size, and modification time and offers download
 
-#### Scenario: Media still opens in a new tab
+#### Scenario: Media opens its in-app view
 
-- **WHEN** the user activates a media file entry
-- **THEN** a new browser tab opens at the file's `/files` URL and no preview screen replaces it
+- **WHEN** the user activates an audio, image, or video entry
+- **THEN** the matching in-app player or viewer opens instead of the metadata-only preview screen
 
 ### Requirement: Unknown routes show a page-not-found screen
 
@@ -617,7 +738,8 @@ in-app audio player instead of a new tab. The player SHALL stream the
 file's plain `/files/<vdir-id>/<virtual-path>` URL through the
 browser's audio element (cookie-authenticated, no auth token in the
 URL), SHALL expose play/pause, a position scrubber with elapsed and
-remaining time, ±15s skip controls, and a dismiss action returning to
+remaining time, ±15s skip controls, skip-next and skip-previous over the
+containing folder's audio entries, and a dismiss action returning to
 the listing, and SHALL start playback only on an explicit user action.
 Tap and the context menu's open action both lead to the player, and
 the context menu's Download action remains available.
@@ -656,6 +778,99 @@ the context menu's Download action remains available.
 
 - **WHEN** a visitor without a session opens a public vdir's audio entry
 - **THEN** the player renders and streams through the public `/files` URL without a login prompt
+
+### Requirement: Audio playback follows the containing folder's queue
+
+The player SHALL derive a queue from the containing directory's audio
+entries in the listing order the browse view shows, excluding
+directories and non-audio files. Skip next and skip previous SHALL move
+to the adjacent queue entry and SHALL wrap around at both ends. A track
+change SHALL update the stream source, title, scrubber, timing readout,
+and download action to the selected track, and SHALL NOT add history
+entries, so browser back still returns to the browse listing.
+
+#### Scenario: Next and previous move through the folder
+
+- **WHEN** the user activates skip next or skip previous on a track in a folder with other audio files
+- **THEN** the player selects the adjacent audio entry in listing order and streams that file
+
+#### Scenario: Queue contains only the folder's audio entries
+
+- **WHEN** the player builds its queue for a folder
+- **THEN** subdirectories, non-audio files, and audio files in other directories are excluded
+
+#### Scenario: Navigation wraps at both ends
+
+- **WHEN** the user activates skip next on the last queued track or skip previous on the first
+- **THEN** the player selects the first or last queued track respectively
+
+#### Scenario: Manual skip preserves the play/pause state
+
+- **WHEN** the user activates skip next or skip previous while playback is paused, or while it is playing
+- **THEN** the player stays paused on the new track, or continues playing it, respectively
+
+#### Scenario: Browser back returns to the listing
+
+- **WHEN** the user has skipped through several tracks and then activates browser back or the player's dismiss action
+- **THEN** the browse listing of the folder is shown instead of the previously played track
+
+#### Scenario: Track change updates the whole player surface
+
+- **WHEN** the selected track changes
+- **THEN** the title, stream URL, scrubber position, elapsed/remaining times, and download target all refer to the newly selected track
+
+### Requirement: The audio player advances through the folder automatically
+
+When playback of a track reaches its end, the player SHALL select the
+next queued track and start playing it without further user action,
+wrapping from the last queued track to the first. If the browser
+refuses the automatic start, the player SHALL present the next track
+paused rather than a stream failure.
+
+#### Scenario: End of track continues with the next track
+
+- **WHEN** a track plays to its end and another queued track follows
+- **THEN** the player selects the next track and begins playing it
+
+#### Scenario: End of the last track wraps to the first
+
+- **WHEN** the last queued track plays to its end
+- **THEN** the player selects the first queued track and begins playing it
+
+#### Scenario: A refused automatic start is not a failure
+
+- **WHEN** the browser blocks the automatic playback of the next track
+- **THEN** that track is shown paused and no stream failure state is reported
+
+### Requirement: The audio player shows folder-derived cover art
+
+The player SHALL display the first image entry of the containing
+directory, in listing order, as the cover art in place of the
+placeholder icon. When the folder has no image entry, or the chosen
+image cannot be loaded or decoded, the player SHALL keep the existing
+music-icon placeholder and SHALL NOT report a stream failure. Cover art
+SHALL load through the same `/files` URL rules as the rest of the UI,
+so public-vdir visitors see it without a session.
+
+#### Scenario: Folder image becomes the cover
+
+- **WHEN** the player opens a track whose folder contains one or more image entries
+- **THEN** the first image entry in listing order is displayed as the cover art
+
+#### Scenario: Folders without an image keep the placeholder
+
+- **WHEN** the player opens a track whose folder contains no image entry
+- **THEN** the music-icon placeholder is shown and no image request is made
+
+#### Scenario: A broken cover falls back silently
+
+- **WHEN** the chosen cover image fails to load or decode
+- **THEN** the music-icon placeholder is shown and playback is unaffected
+
+#### Scenario: Public visitors see the cover
+
+- **WHEN** a visitor without a session opens a public vdir's audio entry in a folder with an image
+- **THEN** the cover art loads through the public `/files` URL without a login prompt
 
 ### Requirement: Image entries open the in-app image viewer
 
