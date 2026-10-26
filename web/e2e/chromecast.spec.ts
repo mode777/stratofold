@@ -99,6 +99,20 @@ test.describe("chromecast", () => {
     await expect(page.getByTestId("cast-indicator")).toContainText(
       "Casting to Test TV",
     );
+    // The indicator turns on at SESSION_STARTED, before the link mint
+    // and loadMedia complete; wait for the stubbed receiver's load.
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(
+            () =>
+              (window as unknown as { __castLoads?: unknown[] }).__castLoads
+                ?.length ?? 0,
+          ),
+        { timeout: 15_000 },
+      )
+      .toBeGreaterThan(0);
+
     const media = await page.evaluate(
       () =>
         (
@@ -113,7 +127,6 @@ test.describe("chromecast", () => {
           }
         ).__castLoads?.[0]?.media,
     );
-    expect(media).toBeTruthy();
     expect(media!.contentType).toBe("video/mp4");
     expect(media!.metadata.title).toBe("movie.mp4");
 
