@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stratofold client test</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+      }
+      body {
+        margin: 0 auto;
+        max-width: 56rem;
+        padding: 1.5rem;
+        line-height: 1.45;
+      }
+      h1 {
+        font-size: 1.35rem;
+        margin-bottom: 0.25rem;
+      }
+      p.lead {
+        margin-top: 0;
+        opacity: 0.75;
+      }
+      section {
+        border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+        border-radius: 0.6rem;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      h2 {
+        font-size: 1rem;
+        margin-top: 0;
+      }
+      label {
+        display: block;
+        font-size: 0.85rem;
+        margin: 0.5rem 0 0.2rem;
+      }
+      input {
+        font: inherit;
+        padding: 0.4rem;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      button {
+        font: inherit;
+        margin: 0.35rem 0.35rem 0 0;
+        padding: 0.4rem 0.7rem;
+        cursor: pointer;
+      }
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+      .row {
+        display: grid;
+        gap: 0.5rem;
+        grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+        align-items: end;
+      }
+      progress {
+        width: 100%;
+        height: 0.9rem;
+      }
+      pre {
+        background: color-mix(in srgb, currentColor 7%, transparent);
+        border-radius: 0.5rem;
+        padding: 0.75rem;
+        max-height: 22rem;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .hint {
+        font-size: 0.8rem;
+        opacity: 0.7;
+      }
+      a {
+        word-break: break-all;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Stratofold client test</h1>
+    <p class="lead">
+      Frontend-only exercise of <code>@stratofold/client</code>. Nothing is
+      stored on a server; connection values stay in this browser.
+    </p>
+
+    <section id="connection">
+      <h2>Connection</h2>
+      <div class="row">
+        <div>
+          <label for="baseUrl">Server base URL</label>
+          <input id="baseUrl" placeholder="https://files.example.com" autocomplete="off" />
+        </div>
+        <div>
+          <label for="vdir">Vdir id (optional for scope discovery)</label>
+          <input id="vdir" placeholder="vdir id" autocomplete="off" />
+        </div>
+        <div>
+          <label for="token">Bearer token (empty = public mode)</label>
+          <input id="token" type="password" placeholder="paste token" autocomplete="off" />
+        </div>
+      </div>
+      <button id="save">Save connection</button>
+      <button id="discover">Discover token scope</button>
+      <p class="hint" id="modeHint">Public mode: listing and reading only.</p>
+    </section>
+
+    <section id="operations">
+      <h2>Operations</h2>
+      <div class="row">
+        <div>
+          <label for="path">Path (file or directory)</label>
+          <input id="path" placeholder="docs/readme.md" autocomplete="off" />
+        </div>
+        <div>
+          <label for="range">Range header (optional, read only)</label>
+          <input id="range" placeholder="bytes=0-99" autocomplete="off" />
+        </div>
+      </div>
+      <button id="list">List</button>
+      <button id="read">Read / download</button>
+      <button id="fileUrl">Plain file URL</button>
+      <button id="mkdir">mkdir</button>
+      <button id="remove">remove</button>
+      <button id="temporaryUrl">Temporary URL</button>
+
+      <div class="row">
+        <div>
+          <label for="moveFrom">Move from</label>
+          <input id="moveFrom" placeholder="old.txt" autocomplete="off" />
+        </div>
+        <div>
+          <label for="moveTo">Move to</label>
+          <input id="moveTo" placeholder="docs/old.txt" autocomplete="off" />
+        </div>
+      </div>
+      <button id="move">move</button>
+
+      <div class="row">
+        <div>
+          <label for="uploadFile">Upload file</label>
+          <input id="uploadFile" type="file" />
+        </div>
+        <div>
+          <label for="uploadPath">Upload target path (defaults to file name)</label>
+          <input id="uploadPath" placeholder="uploads/file.bin" autocomplete="off" />
+        </div>
+      </div>
+      <button id="upload">Upload</button>
+      <button id="cancelUpload" disabled>Cancel upload</button>
+      <progress id="progress" value="0" max="1" hidden></progress>
+      <p class="hint" id="progressText"></p>
+    </section>
+
+    <section>
+      <h2>Log</h2>
+      <p><button id="clearLog">Clear log</button></p>
+      <pre id="log" aria-live="polite"></pre>
+    </section>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

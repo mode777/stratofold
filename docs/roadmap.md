@@ -260,38 +260,37 @@ token key (which signs out every device).
   - Component tests for the Settings mint/list/revoke screen;
     `openspec validate --all --strict`.
 
-### 11. `add-client-library` — typed browser SDK + instance-hosted embed
+### 11. `add-client-library` — typed browser SDK + static test client
 
 The integration surface for frontend-only sites. It consumes change
 10's scoped bearer tokens and adds no authorization semantics of its own.
 
 - **Goal**: a zero-dependency TypeScript package (`@stratofold/client`)
   with ESM and IIFE builds plus bundled types; `list`, `read`, `upload`
-  (progress/abort), `mkdir`, `move`, `remove`, `temporaryUrl`, public
-  mode, and the SPA's deterministic error classes. Header auth only;
-  private media via minted `/s` URLs. Each instance serves the bundle at
-  `/embed/v<major>/stratofold.js` (embedded in the binary), while npm is
-  the source of truth (jsDelivr/unpkg provide the public CDN). The embed
-  infers `baseUrl` from its own URL; npm users pass it explicitly. Docs
-  state the token-audience rule: a token shipped in a public bundle is
-  public.
-- **Specs**: `client-library` (new); delta to `deployment` (embed route,
-  release artifact).
-- **ADRs**: 0013 — client distribution (npm source of truth plus
-  per-instance embed mirror).
-- **Out of scope**: React/Vue wrappers, a central `cdn.stratofold.app`,
-  Node upload progress, offline/service-worker behavior, and the
-  per-visitor connect flow (change 12).
+  (progress/abort), `mkdir`, `move`, `remove`, `temporaryUrl`,
+  `fileUrl`, `tokenInfo`, and the SPA's deterministic error classes.
+  Explicit server base URL and header-only auth; private media via
+  minted `/s` URLs. A private, frontend-only static test client in
+  `client/test-client/` is deployed to GitHub Pages and exercises the
+  built package from a real foreign origin. The server hosts no client
+  copy and gains no new route. Docs state the token-audience rule: a
+  token shipped in a public bundle is public.
+- **Specs**: `client-library` (new).
+- **ADRs**: 0013 — client distribution (npm source of truth, no
+  instance-hosted embed, static test client is verification-only).
+- **Out of scope**: npm publishing from CI, React/Vue wrappers, a
+  central `cdn.stratofold.app`, Node upload progress, offline
+  behavior, and the per-visitor connect flow (change 12).
 - **Validation**:
   - Unit: every operation against a fake fetch/XHR; error mapping;
-    upload progress/abort; `temporaryUrl` expiry/reuse; public mode;
-    base-URL inference; the token never appears in a URL.
+    upload progress/abort; `temporaryUrl` expiry and no token in the
+    URL; public mode; the README snippets type-check.
   - Bundle: ESM + IIFE smoke tests, zero runtime dependencies, types
-    compile.
-  - Cross-origin E2E on the verification server: a second-origin fixture
-    page loads the built `/embed` bundle, lists, uploads, range-reads,
-    and downloads against the harness; assert preflights and no token in
-    any URL.
+    compile, `npm pack --dry-run` contains only `dist` and the README.
+  - Cross-origin E2E on the verification server: the test client on a
+    second origin lists, uploads, range-reads, redeems a temporary link
+    cookieless, browses a public vdir, and no request URL carries the
+    token.
   - `openspec validate --all --strict`.
 
 ## Conditional follow-ons
@@ -342,8 +341,8 @@ that need standard refresh/rotation semantics.
 - 7 needs the API of 4–5; 8 builds on 7; 9 is last.
 - 10 is the first post-core change: it builds on the vdir/authz seams
   from 3 and 6 and the `/s` machinery from the expiring-links change.
-- 11 builds on 10 and the existing SPA-facing API (4, 5); its only
-  server-side addition is the `/embed` route.
+- 11 builds on 10 and the existing SPA-facing API (4, 5); it adds no
+  server route (there is no `/embed`; the package ships via npm).
 - 12 and 13 are gated follow-ons: do not start them until the trigger
   in each entry is real. Option B (10 + 11) is the chosen first step and
   does not depend on them.

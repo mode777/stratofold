@@ -156,6 +156,26 @@ the specs and files that own each fact.
   ./internal/fsapi/ ./internal/fileserver/ ./internal/filelinks/
   ./internal/migrations/ ./internal/appserver/` and
   `npm --prefix web run test`.
+- **Browser client** (change `add-client-library`): `client/` is
+  `@stratofold/client`, a zero-dependency TypeScript package (ESM + IIFE
+  `Stratofold` global + types, no runtime deps) over the existing bearer
+  API for one vdir: `list`, `read` (range pass-through), `upload`
+  (progress/abort via XHR), `mkdir`, `move`, `remove`, `temporaryUrl`,
+  `fileUrl`, and `tokenInfo` (`/api/sf/tokens/me`). The server base URL
+  is explicit, the token is header-only (never in a URL), failures are
+  the deterministic `StratofoldError` kinds (401/403/404/400/503/5xx,
+  network → retryable 0), and public mode is simply "no token". The
+  server hosts no copy and has no `/embed` route (ADR 0013);
+  distribution is npm. `client/test-client/` is a private, static Vite
+  app deployed to GitHub Pages by `.github/workflows/client-pages.yaml`
+  that exercises every operation at runtime (no checked-in instance or
+  token; production builds refuse `VITE_SF_*` values). Verification:
+  `npm --prefix client run test` (unit + dist/IIFE smoke),
+  `npm --prefix client run typecheck:readme`,
+  `npm --prefix client/test-client run test`, and the cross-origin
+  Playwright suite `client/test-client/e2e/` on the build/verification
+  server. `go test ./internal/appserver/` pins the cross-origin
+  preflight and `/files` expose headers the client relies on.
 - **Web UI** (roadmap change 7): the SPA lives in the `web/` workspace
   (Vite + React + TS + Tailwind, ADR 0005) and is an iOS-style mobile
    shell (ADR 0008): a translucent bottom tab bar below `md` and a

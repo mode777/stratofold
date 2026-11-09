@@ -1,0 +1,40 @@
+{
+  "name": "@stratofold/client",
+  "version": "0.1.0",
+  "description": "Typed, zero-dependency browser client for Stratofold vdir-scoped bearer access",
+  "license": "ISC",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mode777/stratofold.git",
+    "directory": "client"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.json && npm run build:iife",
+    "build:esm": "tsc -p tsconfig.json",
+    "build:iife": "esbuild src/index.ts --bundle --minify --format=iife --global-name=Stratofold --outfile=dist/stratofold.min.js",
+    "test": "npm run build && vitest run",
+    "test:watch": "vitest",
+    "typecheck:readme": "node scripts/check-readme.mjs",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

@@ -1,4 +1,9 @@
 node_modules/
+client/node_modules/
+client/dist/
+client/test-client/node_modules/
+client/test-client/dist/
+.env*.local
 build/
 build-*/
 __pycache__/

@@ -60,6 +60,9 @@ upgrades, and backups, is in the
   installed app.
 - [Hosting Stratofold](docs/hosting.md) — the hosting guide: running
   the image, first-time setup, HTTPS, upgrading, and backup.
+- [Client library](client/README.md) — the npm browser SDK for
+  third-party apps, and the static GitHub Pages
+  [test client](https://mode777.github.io/stratofold/).
 
 ## For contributors
 
