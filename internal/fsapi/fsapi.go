@@ -29,11 +29,10 @@ import (
 	"github.com/pocketbase/pocketbase/tools/hook"
 	"github.com/pocketbase/pocketbase/tools/router"
 
-	"github.com/mode777/stratofold/internal/authbridge"
+	"github.com/mode777/stratofold/internal/requestauth"
 	"github.com/mode777/stratofold/internal/sftpreadwrite"
 	"github.com/mode777/stratofold/internal/sshconn"
 	"github.com/mode777/stratofold/internal/vdir"
-	"github.com/mode777/stratofold/internal/vdirauthz"
 	"github.com/mode777/stratofold/internal/vdirpath"
 )
 
@@ -101,47 +100,6 @@ func bindPathBody(e *core.RequestEvent, allowEmpty bool) (pathBody, error) {
 	return b, nil
 }
 
-// authorize is the design-D2 access decision, made before any remote
-// operation and resolved through the shared seam (design D1): `ls` is
-// a read (public vdirs also serve it anonymously); mkdir/mv/rm/upload
-// are writes (owner or editor everywhere — public never implies
-// write). Denied requests map to `401` when unauthenticated or
-// carrying an invalid session, `403` when authenticated without a
-// sufficient grant. Returned errors are response-ready.
-func authorize(e *core.RequestEvent, vd *core.Record, writeOp bool) error {
-	cookieVal := cookieValue(e)
-	user, _ := e.App.FindAuthRecordByToken(cookieVal, core.TokenTypeAuth)
-	var userID string
-	if user != nil {
-		userID = user.Id
-	}
-
-	d := vdirauthz.Resolve(e.App, vd, userID)
-	allowed := d.CanRead()
-	if writeOp {
-		allowed = d.CanWrite()
-	}
-	if allowed {
-		return nil
-	}
-
-	if user == nil {
-		if cookieVal == "" {
-			return e.UnauthorizedError("Authentication required", nil)
-		}
-		return e.UnauthorizedError("Invalid or expired session", nil)
-	}
-	return e.ForbiddenError("Forbidden", nil)
-}
-
-func cookieValue(e *core.RequestEvent) string {
-	cookie, err := e.Request.Cookie(authbridge.SessionCookieName)
-	if err != nil {
-		return ""
-	}
-	return cookie.Value
-}
-
 // entry is one listing row.
 type entry struct {
 	Name    string `json:"name"`
@@ -158,7 +116,7 @@ func handleLs(e *core.RequestEvent) error {
 	if err != nil {
 		return respondErr(e, err)
 	}
-	if err := authorize(e, vd, false); err != nil {
+	if _, err := requestauth.AuthorizeVdir(e, vd, false); err != nil {
 		return err
 	}
 	body, err := bindPathBody(e, true)
@@ -221,7 +179,7 @@ func handleMkdir(e *core.RequestEvent) error {
 	if err != nil {
 		return respondErr(e, err)
 	}
-	if err := authorize(e, vd, true); err != nil {
+	if _, err := requestauth.AuthorizeVdir(e, vd, true); err != nil {
 		return err
 	}
 	body, err := bindPathBody(e, false)
@@ -261,7 +219,7 @@ func handleMv(e *core.RequestEvent) error {
 	if err != nil {
 		return respondErr(e, err)
 	}
-	if err := authorize(e, vd, true); err != nil {
+	if _, err := requestauth.AuthorizeVdir(e, vd, true); err != nil {
 		return err
 	}
 	body, err := bindPathBody(e, false)
@@ -309,7 +267,7 @@ func handleRm(e *core.RequestEvent) error {
 	if err != nil {
 		return respondErr(e, err)
 	}
-	if err := authorize(e, vd, true); err != nil {
+	if _, err := requestauth.AuthorizeVdir(e, vd, true); err != nil {
 		return err
 	}
 	body, err := bindPathBody(e, false)
@@ -362,7 +320,7 @@ func handleUpload(e *core.RequestEvent) error {
 	if err != nil {
 		return respondErr(e, err)
 	}
-	if err := authorize(e, vd, true); err != nil {
+	if _, err := requestauth.AuthorizeVdir(e, vd, true); err != nil {
 		return err
 	}
 

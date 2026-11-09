@@ -73,11 +73,11 @@ func TestSweepExpired(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	live, liveToken, err := createLink(app, vdir.Id, "live.txt", user.Id, now)
+	live, liveToken, err := createLink(app, vdir.Id, "live.txt", user.Id, "", now)
 	if err != nil {
 		t.Fatalf("create live link: %v", err)
 	}
-	expired, _, err := createLink(app, vdir.Id, "expired.txt", user.Id, now)
+	expired, _, err := createLink(app, vdir.Id, "expired.txt", user.Id, "", now)
 	if err != nil {
 		t.Fatalf("create expired link: %v", err)
 	}

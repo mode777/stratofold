@@ -48,7 +48,7 @@ func hashToken(token string) string {
 
 // createLink stores one link row and returns the record plus the
 // once-only plaintext token.
-func createLink(app core.App, vdirID, virtualPath, userID string, now time.Time) (*core.Record, string, error) {
+func createLink(app core.App, vdirID, virtualPath, userID, mintedByToken string, now time.Time) (*core.Record, string, error) {
 	token, err := newToken()
 	if err != nil {
 		return nil, "", err
@@ -62,6 +62,9 @@ func createLink(app core.App, vdirID, virtualPath, userID string, now time.Time)
 	rec.Set("path", virtualPath)
 	rec.Set("created_by", userID)
 	rec.Set("token_hash", hashToken(token))
+	if mintedByToken != "" {
+		rec.Set("minted_by_token", mintedByToken)
+	}
 	expiresAt, err := types.ParseDateTime(now.Add(LinkTTL))
 	if err != nil {
 		return nil, "", err

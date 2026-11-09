@@ -170,6 +170,35 @@ by the grantee's exact registered email, as `viewer` or `editor`
   links keep working if the vdir is un-published. There is no link
   manager yet — mint a new link if you need to copy one again.
 
+## Connecting an app (access tokens)
+
+**Settings → Connected apps** lets you mint a bearer credential for a
+script or third-party app that needs to read or write one vdir without
+your sign-in cookie
+([vdir-access-tokens spec](../openspec/specs/vdir-access-tokens/spec.md)).
+Choose a vdir you own or one shared with you, give the token a name,
+pick `viewer` (browse and download) or `editor` (also upload, rename,
+move, and delete) where your role allows it, and optionally set an
+expiry.
+
+- The token is shown **once**, on the screen that creates it. Copy it
+  then; the app needs it in an `Authorization: Bearer …` header.
+- A token is bound to that one user and vdir. It cannot be used on
+  another vdir, and its role is capped by your current access: a viewer
+  token stays read-only even for an owner, and an editor token stops
+  writing if your share is downgraded.
+- Removing your share, changing your role, deleting the vdir or user, or
+  letting the token expire ends its access on the next request. An
+  editor can mint an editor token, and a viewer can mint only a viewer
+  token.
+- Revoke a token from the same screen; it stops working immediately.
+  **Last used** helps you spot stale credentials.
+- A token is a bearer secret: anyone who has it can use it until it is
+  revoked or expires. Do not put a token for private data in a public
+  website's bundle, and serve the instance over HTTPS. There is no
+  per-visitor consent flow yet — a multi-user website should not ask
+  users to paste a token into the site.
+
 ## Public browsing
 
 Anyone can open a public vdir's link without an account and browse,
@@ -199,5 +228,7 @@ specs under [`openspec/specs/`](../openspec/specs/) — in particular
 [`web-ui`](../openspec/specs/web-ui/spec.md),
 [`filesystem-api`](../openspec/specs/filesystem-api/spec.md),
 [`sharing-access-control`](../openspec/specs/sharing-access-control/spec.md),
-and [`pwa`](../openspec/specs/pwa/spec.md). If this guide and a spec
+and [`pwa`](../openspec/specs/pwa/spec.md); access-token behavior is
+pinned by the `vdir-access-tokens` capability and
+[ADR 0012](decisions/0012-vdir-access-tokens.md). If this guide and a spec
 ever disagree, the spec wins — and this guide needs fixing.

@@ -15,6 +15,7 @@ import (
 	"github.com/mode777/stratofold/internal/testapp"
 	"github.com/mode777/stratofold/internal/userlookup"
 	"github.com/mode777/stratofold/internal/vdirmeta"
+	"github.com/mode777/stratofold/internal/vdirtokens"
 )
 
 func bodyBytes(t *testing.T, resp *http.Response) []byte {
@@ -100,6 +101,32 @@ func TestVdirMetaRoutesStayInsideSfNamespace(t *testing.T) {
 		if !strings.HasPrefix(r.Path, "/api/sf/") {
 			t.Errorf("vdir-meta route %s %s escaped the /api/sf/ namespace", r.Method, r.Path)
 		}
+	}
+}
+
+func TestVdirTokenRoutesStayInsideSfNamespace(t *testing.T) {
+	routes := vdirtokens.CustomRoutes()
+	if len(routes) == 0 {
+		t.Fatal("no vdir-token routes registered")
+	}
+	for _, r := range routes {
+		if !strings.HasPrefix(r.Path, "/api/sf/") {
+			t.Errorf("vdir-token route %s %s escaped the /api/sf/ namespace", r.Method, r.Path)
+		}
+	}
+
+	s := testapp.Start(t)
+	resp, err := http.Get(s.BaseURL + "/api/sf/tokens")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b := bodyBytes(t, resp)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("anonymous token list: status %d, want 401", resp.StatusCode)
+	}
+	if !bytes.Contains(b, []byte(`"message":"Authentication required.`)) {
+		t.Fatalf("token list probe did not reach the session middleware: %s", b)
 	}
 }
 

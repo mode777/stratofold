@@ -21,6 +21,7 @@ directory holds only what stays true after a change is archived.
 | 0009 | Accepted | Installable PWA with no offline capability |
 | 0010 | Accepted | Expiring capability links for session-less file access |
 | 0011 | Accepted | Chromecast via the Web Sender SDK and the Default Media Receiver |
+| 0012 | Accepted | Vdir-scoped access tokens for third-party clients |
 
 ## Adding a decision
 

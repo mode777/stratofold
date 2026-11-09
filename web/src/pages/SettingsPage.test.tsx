@@ -28,6 +28,7 @@ function renderSettings() {
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/settings/connections" element={<ConnectionsPage />} />
         <Route path="/settings/vdirs" element={<VdirsPage />} />
+        <Route path="/settings/apps" element={<div data-testid="apps-route">apps</div>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -56,6 +57,10 @@ describe("settings", () => {
     await user.click(screen.getByText("Settings"));
     await user.click(await screen.findByTestId("settings-vdirs"));
     await waitFor(() => expect(screen.getByTestId("vdirs-page")).toBeInTheDocument());
+
+    await user.click(screen.getByText("Settings"));
+    await user.click(await screen.findByTestId("settings-apps"));
+    await waitFor(() => expect(screen.getByTestId("apps-route")).toBeInTheDocument());
   });
 
   it("confirms before signing out on all devices", async () => {

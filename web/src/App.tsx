@@ -17,6 +17,7 @@ import { ConnectionFormPage } from "./pages/ConnectionFormPage";
 import { VdirsPage } from "./pages/VdirsPage";
 import { VdirFormPage } from "./pages/VdirFormPage";
 import { SharingPage } from "./pages/SharingPage";
+import { AppsPage } from "./pages/AppsPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 
 export function App() {
@@ -94,6 +95,7 @@ export function AppRoutes() {
         <Route path="/v/:vdirId/*" element={<BrowsePage />} />
         <Route path="/uploads" element={<UploadsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/settings/apps" element={<AppsPage />} />
         <Route path="/settings/connections" element={<ConnectionsPage />} />
         <Route path="/settings/connections/:id" element={<ConnectionFormPage />} />
         <Route path="/settings/vdirs" element={<VdirsPage />} />

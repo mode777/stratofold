@@ -20,6 +20,7 @@ import (
 	_ "github.com/mode777/stratofold/internal/migrations"
 	"github.com/mode777/stratofold/internal/userlookup"
 	"github.com/mode777/stratofold/internal/vdirmeta"
+	"github.com/mode777/stratofold/internal/vdirtokens"
 	"github.com/mode777/stratofold/internal/webassets"
 )
 
@@ -90,6 +91,9 @@ func Install(app core.App, opts Options) {
 		fsapi.RegisterRoutes(se.Router.RouterGroup,
 			&hook.Handler[*core.RequestEvent]{Func: ClearStreamDeadlines()})
 		userlookup.RegisterRoutes(se.Router.RouterGroup)
+		// Vdir access tokens: session-only management plus the
+		// bearer-only introspection route.
+		vdirtokens.RegisterRoutes(se.Router.RouterGroup)
 		// The public-vdir metadata route is session-free by design;
 		// like every custom route it must precede the SPA catch-all.
 		vdirmeta.RegisterRoutes(se.Router.RouterGroup)

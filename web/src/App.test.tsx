@@ -88,6 +88,9 @@ describe("app shell and routing", () => {
 
     renderApp("/settings/vdirs");
     await waitFor(() => expect(screen.getByTestId("vdirs-page")).toBeInTheDocument());
+
+    renderApp("/settings/apps");
+    await waitFor(() => expect(screen.getByTestId("apps-page")).toBeInTheDocument());
   });
 
   it("renders a catch-all page-not-found", async () => {
@@ -189,7 +192,7 @@ describe("anonymous public browsing gate", () => {
     installPbMock([]);
     installFetchMock([]);
 
-    for (const path of ["/v/pub/move", "/uploads", "/settings", "/files"]) {
+    for (const path of ["/v/pub/move", "/uploads", "/settings", "/settings/apps", "/files"]) {
       const view = renderApp(path);
       await waitFor(() => expect(screen.getByLabelText("Email")).toBeInTheDocument());
       view.unmount();

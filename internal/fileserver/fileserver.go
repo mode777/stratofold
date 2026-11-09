@@ -22,10 +22,9 @@ import (
 	"github.com/pocketbase/pocketbase/tools/hook"
 	"github.com/pocketbase/pocketbase/tools/router"
 
-	"github.com/mode777/stratofold/internal/authbridge"
+	"github.com/mode777/stratofold/internal/requestauth"
 	"github.com/mode777/stratofold/internal/sftpreadwrite"
 	"github.com/mode777/stratofold/internal/vdir"
-	"github.com/mode777/stratofold/internal/vdirauthz"
 )
 
 // Route describes one route registered by RegisterRoutes.
@@ -52,8 +51,18 @@ func CustomRoutes() []Route {
 func RegisterRoutes(g *router.RouterGroup[*core.RequestEvent], middlewares ...*hook.Handler[*core.RequestEvent]) {
 	sub := g.Group("/files")
 	sub.Bind(middlewares...)
+	sub.BindFunc(exposeHeaders)
 	sub.GET("/{vdirId}", handle)
 	sub.GET("/{vdirId}/{path...}", handle)
+}
+
+// exposeHeaders makes the representation headers a cross-origin SDK
+// needs readable. PocketBase's global CORS already permits the Origin,
+// Authorization, and Range preflight.
+func exposeHeaders(e *core.RequestEvent) error {
+	e.Response.Header().Set("Access-Control-Expose-Headers",
+		"Accept-Ranges, Content-Length, Content-Range, Content-Type, ETag, Last-Modified, Content-Disposition")
+	return e.Next()
 }
 
 // handle serves one GET through the fail-closed order of design D2:
@@ -76,20 +85,12 @@ func handle(e *core.RequestEvent) error {
 		return e.NotFoundError("Not found", nil)
 	}
 
-	// (2) Access decision — never behind a dial: non-public vdirs
-	// serve the owner or a vdir_shares grant holder (viewer/editor);
-	// public vdirs serve everyone (design D1/D3 via internal/vdirauthz).
+	// (2) Access decision — never behind a dial. Non-public vdirs
+	// accept the owner/grantee cookie or a vdir-scoped bearer token;
+	// public vdirs stay anonymous reads and skip credential checks.
 	if !vd.GetBool("is_public") {
-		cookie, err := e.Request.Cookie(authbridge.SessionCookieName)
-		if err != nil || cookie.Value == "" {
-			return e.UnauthorizedError("Authentication required", nil)
-		}
-		user, err := e.App.FindAuthRecordByToken(cookie.Value, core.TokenTypeAuth)
-		if err != nil {
-			return e.UnauthorizedError("Invalid or expired session", nil)
-		}
-		if !vdirauthz.Resolve(e.App, vd, user.Id).CanRead() {
-			return e.ForbiddenError("Forbidden", nil)
+		if _, err := requestauth.AuthorizeVdir(e, vd, false); err != nil {
+			return err
 		}
 	}
 

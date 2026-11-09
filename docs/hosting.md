@@ -92,6 +92,18 @@ docker run --rm -it -v stratofold-data:/pb_data \
   buffering and preserve `Range` headers so seeking and long media
   playback work. Links are fixed at 24 hours; there is no server setting
   to change that today.
+- **API access tokens.** **Settings → Connected apps** mints
+  vdir-scoped bearer tokens for scripts and third-party apps. The
+  plaintext is shown once and stored only as a SHA-256 hash; revoking it
+  takes effect on the next request. Treat a token as a password for its
+  one vdir: serve the instance over HTTPS, and never log the
+  `Authorization` header at the proxy. PocketBase's global CORS policy
+  is permissive (`Access-Control-Allow-Origin: *`, no credentials), so
+  a browser app from any origin can use a token it has been given; the
+  containment is the single-vdir scope, the role cap, the optional
+  expiry, and revocation, not an origin allowlist. Tokens are never
+  accepted in URLs; private media uses a token-minted `/s/` link and
+  therefore follows the 24-hour/proxy-log notes above.
 - **Casting.** The in-app Cast button uses the Google-hosted Web Sender
   SDK, so the sender page needs HTTPS and internet access to
   `www.gstatic.com`; the Cast device must be able to reach the Stratofold

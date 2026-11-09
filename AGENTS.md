@@ -133,9 +133,29 @@ the specs and files that own each fact.
   `no-store` with permissive CORS, and the token is redacted from
   PocketBase's request log. `/files` access rules are unchanged. The
   browse context menu offers **Copy 24-hour link** to signed-in readers
-  on non-public vdirs; public vdirs keep **Copy public link**. See ADR
-  0010. Verification: `go test ./internal/filelinks/` (mint/redemption/
-  expiry/revocation/header/log-redaction matrices).
+  on non-public vdirs; public vdirs keep **Copy public link**. A link
+  minted through a vdir access token records `minted_by_token` and dies
+  when that token is revoked or expires. See ADR 0010. Verification:
+  `go test ./internal/filelinks/` (mint/redemption/expiry/revocation/
+  header/log-redaction matrices).
+- **Vdir access tokens** (change `add-vdir-access-tokens`): a user
+  mints a session-only, single-vdir bearer token under
+  `/api/sf/tokens` (`POST`/`GET`, `DELETE /{id}`) with role
+  `viewer`/`editor`, a required name, optional expiry, last-used audit,
+  and a once-only plaintext. `vdir_tokens` has no record-API rules;
+  tokens are 256-bit `sf_v1_` values stored only as SHA-256 hashes.
+  `GET /api/sf/tokens/me` is bearer-only scope discovery. Bearer auth
+  (`internal/requestauth`) is accepted on `/api/sf/vdirs/*`, `/files`
+  for non-public vdirs, and link minting; it is authoritative over a
+  cookie, must match the token's vdir, and allows only
+  `min(token role, vdirauthz.Resolve(user, vdir))` — public read access
+  alone does not keep a token alive. Management is never bearer-capable.
+  Private native media uses token-minted `/s` links; tokens never appear
+  in URLs. Settings → Connected apps lists/mints/revokes. ADR 0012.
+  Verification: `go test ./internal/vdirtokens/ ./internal/requestauth/
+  ./internal/fsapi/ ./internal/fileserver/ ./internal/filelinks/
+  ./internal/migrations/ ./internal/appserver/` and
+  `npm --prefix web run test`.
 - **Web UI** (roadmap change 7): the SPA lives in the `web/` workspace
   (Vite + React + TS + Tailwind, ADR 0005) and is an iOS-style mobile
    shell (ADR 0008): a translucent bottom tab bar below `md` and a
@@ -145,7 +165,8 @@ the specs and files that own each fact.
    the in-app audio player, the in-app fullscreen image gallery, or the Quick Look
    metadata card), `/v/:vdirId/move` (move
    picker), `/uploads`, `/settings`, `/settings/connections[/:id]`,
-   `/settings/vdirs[/:id[/sharing]]`; unknown routes show Page Not Found.
+   `/settings/vdirs[/:id[/sharing]]`, `/settings/apps` (Connected apps);
+   unknown routes show Page Not Found.
    Tap behavior follows the file kind (`web/src/lib/entryKind.ts`):
    audio opens the in-app player, images the in-app fullscreen gallery,
    and video the in-app video player (`web/src/pages/VideoPlayerPage.tsx`,

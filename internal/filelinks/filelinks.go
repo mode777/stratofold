@@ -14,9 +14,10 @@ import (
 	"github.com/pocketbase/pocketbase/tools/hook"
 	"github.com/pocketbase/pocketbase/tools/router"
 
-	"github.com/mode777/stratofold/internal/authbridge"
 	"github.com/mode777/stratofold/internal/fileserver"
+	"github.com/mode777/stratofold/internal/requestauth"
 	"github.com/mode777/stratofold/internal/vdirauthz"
+	"github.com/mode777/stratofold/internal/vdirtokens"
 )
 
 // Route describes one route registered by RegisterRoutes.
@@ -82,26 +83,18 @@ func handleOptions(e *core.RequestEvent) error {
 	return e.NoContent(http.StatusNoContent)
 }
 
-// handleMint creates a link for one virtual path. Authentication uses
-// the same sf_session cookie as the filesystem API; access is the
-// shared vdirauthz read decision, and the handler never dials SSH
-// (design D4).
+// handleMint creates a link for one virtual path. Authentication is
+// the shared cookie-or-bearer read decision; the handler never dials
+// SSH (design D4). A token-minted link records its source token so
+// revocation ends the link with it.
 func handleMint(e *core.RequestEvent) error {
 	vd, err := e.App.FindRecordById("vdirs", e.Request.PathValue("vdirId"))
 	if err != nil {
 		return e.NotFoundError("Not found", nil)
 	}
-
-	cookie, err := e.Request.Cookie(authbridge.SessionCookieName)
-	if err != nil || cookie.Value == "" {
-		return e.UnauthorizedError("Authentication required", nil)
-	}
-	user, err := e.App.FindAuthRecordByToken(cookie.Value, core.TokenTypeAuth)
+	cred, err := requestauth.AuthorizeReader(e, vd)
 	if err != nil {
-		return e.UnauthorizedError("Invalid or expired session", nil)
-	}
-	if !vdirauthz.Resolve(e.App, vd, user.Id).CanRead() {
-		return e.ForbiddenError("Forbidden", nil)
+		return err
 	}
 
 	var body struct {
@@ -127,7 +120,11 @@ func handleMint(e *core.RequestEvent) error {
 		// Housekeeping only: never fail a mint for it.
 		e.App.Logger().Warn("file_links: sweep failed", "error", err)
 	}
-	if _, token, err := createLink(e.App, vd.Id, virtualPath, user.Id, now); err != nil {
+	mintedByToken := ""
+	if cred.Token != nil {
+		mintedByToken = cred.Token.ID
+	}
+	if _, token, err := createLink(e.App, vd.Id, virtualPath, cred.UserID(), mintedByToken, now); err != nil {
 		return e.InternalServerError("Could not create link", nil)
 	} else {
 		return e.JSON(http.StatusCreated, map[string]any{
@@ -145,11 +142,12 @@ func handleServe(e *core.RequestEvent) error {
 	if token == "" {
 		return e.NotFoundError("Not found", nil)
 	}
+	now := time.Now().UTC()
 	link, err := findLinkByToken(e.App, token)
 	if err != nil {
 		return e.NotFoundError("Not found", nil)
 	}
-	if !time.Now().Before(link.GetDateTime("expires_at").Time()) {
+	if !now.Before(link.GetDateTime("expires_at").Time()) {
 		return e.NotFoundError("Not found", nil)
 	}
 	vd, err := e.App.FindRecordById("vdirs", link.GetString("vdir"))
@@ -158,6 +156,12 @@ func handleServe(e *core.RequestEvent) error {
 	}
 	if !vdirauthz.Resolve(e.App, vd, link.GetString("created_by")).CanRead() {
 		return e.NotFoundError("Not found", nil)
+	}
+	if tokenID := link.GetString("minted_by_token"); tokenID != "" {
+		src, err := vdirtokens.FindByID(e.App, tokenID)
+		if err != nil || src.Expired(now) || src.UserID != link.GetString("created_by") || src.VdirID != vd.Id {
+			return e.NotFoundError("Not found", nil)
+		}
 	}
 
 	virtualPath := link.GetString("path")

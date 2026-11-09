@@ -62,6 +62,12 @@ Covers what PocketBase cannot: operations against remote hosts.
 - `POST /api/sf/auth` — authenticates against PocketBase and additionally
   sets the HttpOnly `sf_session` cookie used by `/files/*` (the session
   bridge, ADR 0002). `DELETE /api/sf/auth` clears it.
+- `POST /api/sf/tokens` / `GET /api/sf/tokens` / `DELETE
+  /api/sf/tokens/{id}` — session-only management of vdir-scoped access
+  tokens (mint, list metadata, revoke). `GET /api/sf/tokens/me` is the
+  bearer-only scope-discovery route. The plaintext token appears only
+  in the mint response; the collection has no record-API rules
+  ([ADR 0012](decisions/0012-vdir-access-tokens.md)).
 - `GET /api/sf/users/lookup?email=…` — authenticated, exact-match
   resolution of an email to `{id, email}` for naming share grantees;
   at most one record, no listing/search form (any other query shape is
@@ -97,7 +103,11 @@ Covers what PocketBase cannot: operations against remote hosts.
 All operations resolve through the vdir sandbox before any SSH dial
 (sandbox rejections and missing targets are `404`), authorize
 before dialing (`401`/`403` never wake a connection), retry
-idempotently across connection drops, and map errors
+idempotently across connection drops, and map errors. A request may
+authenticate with the `sf_session` cookie or a vdir-scoped bearer token
+(`Authorization: Bearer sf_v1_…`); a bearer is authoritative when
+present, and its effective access is the smaller of its role and the
+user's current grant.
 deterministically: not-found family `404`, permission denied `403`,
 invalid request shape `400`, retryable/unreachable `503`, anything
 else `500`. Create-type operations resolve through a sandbox-checked
@@ -121,9 +131,26 @@ cache, no full-file download before serving; a connection drop
 mid-response resumes at the served offset within the same response.
 Access is decided before any SSH dial: non-public virtual directories
 require the `sf_session` cookie of the vdir's owner or of a user
-holding a `viewer`/`editor` share (resolved per request against
+holding a `viewer`/`editor` share, or a valid vdir-scoped bearer token
+whose user still holds the grant (resolved per request against
 `vdirs` + `vdir_shares`, so revocation is immediate); public ones are
-served to everyone.
+served to everyone. `/files` exposes the representation headers a
+cross-origin SDK needs; PocketBase's global CORS permits the
+`Authorization` and `Range` preflight.
+
+### Vdir access tokens — `/api/sf/tokens`
+
+A token is user-bound and scoped to one vdir, with role `viewer` or
+`editor`, a required name, an optional expiry, and a last-used audit
+timestamp. It is 32 random bytes prefixed `sf_v1_`, stored only as a
+SHA-256 hash plus a non-secret hint, and is shown once at mint.
+Management requires the session cookie; a bearer can never mint, list,
+or revoke tokens. Bearer authorization re-resolves `vdirauthz` on every
+request and requires an editor token plus an editor grant for writes, so
+a share removal, role change, deletion, or expiry ends access on the
+next request. Tokens are not accepted in URLs; private native media uses
+a token-minted `/s` link. See
+[ADR 0012](decisions/0012-vdir-access-tokens.md).
 
 ### Temporary file links — `/s/*`
 
@@ -139,8 +166,13 @@ sandbox, and serves with the same Range/conditional/reconnect paths as
 failure is an indistinguishable `404`; responses are `no-store` with
 permissive CORS, and the token is redacted from the request log. An
 owner-created link survives un-publishing until expiry; a viewer's link
-ends when the share is removed. `/files` access rules are unchanged
-([ADR 0010](decisions/0010-expiring-file-links.md)).
+ends when the share is removed. A link minted through a bearer token
+stores that token in `file_links.minted_by_token`; redemption also
+requires the source token to exist and be unexpired, so revoking or
+expiring the token kills its links immediately. Cookie-minted links are
+unchanged, and `/files` access rules are unchanged
+([ADR 0010](decisions/0010-expiring-file-links.md),
+[ADR 0012](decisions/0012-vdir-access-tokens.md)).
 
 ### SSH connection manager
 
@@ -228,7 +260,8 @@ in-app navigation only (see the Upload flow).
 | `connections` | owner, label, host, port, username, auth method (`password`\|`key`), password, private key, key passphrase, host-key fingerprint (optional), remote directory | owner-only CRUD via API rules; secrets sealed at rest (AES-256-GCM, key in `_params`) and absent from every API response; host key pinned when supplied, otherwise captured on first successful use (ADR 0007); `remote_dir` is a record-only default for new vdir root paths |
 | `vdirs` | owner, connection (rel), name, root path, is public | owner-only CRUD; reads (list/view) extend to users holding a share (back-relation rule, multi-match `?=`); a vdir must reference an own connection (rule-guarded on create and rebind); unique(owner, name); `is_public` grants anonymous read-only access |
 | `vdir_shares` | vdir (rel, cascade), user (rel, cascade), role (`viewer`/`editor`), unique(vdir, user) | owner-managed via API rules; the grantee sees their own shares; drives both the record-API read extension and the `/api/sf` + `/files` middleware |
-| `file_links` | vdir (rel, cascade), path (virtual), created_by (rel, cascade), token_hash (unique), expires_at | rows are created/read only by the custom mint and `/s/` routes; record rules are unset (superuser-only); tokens live only as a SHA-256 hash; fixed 24h expiry, creator access re-checked per redemption |
+| `vdir_tokens` | user (rel, cascade), vdir (rel, cascade), name, role (`viewer`/`editor`), token_hash (unique), token_hint, expires_at, last_used_at | rows are created/read only by the custom `/api/sf/tokens` routes; record rules are unset (superuser-only); plaintext lives only in the mint response; access is re-resolved against the user's current grant per request (ADR 0012) |
+| `file_links` | vdir (rel, cascade), path (virtual), created_by (rel, cascade), token_hash (unique), expires_at, minted_by_token (rel, nullable, cascade) | rows are created/read only by the custom mint and `/s/` routes; record rules are unset (superuser-only); tokens live only as a SHA-256 hash; fixed 24h expiry, creator access re-checked per redemption; a token-minted link also requires its source token to be live |
 
 Every path operation through a vdir goes through one internal seam:
 lexical anchoring under the vdir root, then a server-side walk that
@@ -244,12 +277,14 @@ Access enforcement happens twice, on purpose:
 - Remote filesystem operations (`/api/sf/*`, `/files/*`) are enforced by
   server middleware that resolves the requesting user against `vdirs` +
   `vdir_shares` per request (`viewer` = browse + download, `editor` = +
-  upload/move/delete, owner outranks shares). Public vdirs bypass auth
-  for read-only operations; writes always require owner or `editor` on
-  that vdir. Both surfaces resolve through one shared seam
-  (`internal/vdirauthz`) so they cannot drift, and because grants are
-  never cached, removing a share or un-publishing applies to the next
-  request even with a still-valid cookie.
+  upload/move/delete, owner outranks shares). The credential may be the
+  `sf_session` cookie or a vdir-scoped bearer token; a token is accepted
+  only on its own vdir and its role caps the effective access. Public
+  vdirs bypass auth for read-only operations; writes always require
+  owner or `editor` on that vdir. Both surfaces resolve through one
+  shared seam (`internal/vdirauthz`) so they cannot drift, and because
+  grants are never cached, removing a share or un-publishing applies to
+  the next request even with a still-valid cookie or token.
 
 ## Failure and retry model
 

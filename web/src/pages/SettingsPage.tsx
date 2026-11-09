@@ -9,7 +9,7 @@ import { useSession } from "../lib/session";
 import { useInstallPrompt } from "../lib/useInstallPrompt";
 import { useVdirs } from "../lib/useVdirs";
 import { Alert } from "../components/Dialog";
-import { ChevronRightIcon, FolderIcon, InstallIcon, LogoutIcon, PersonIcon, ServerIcon } from "../components/icons";
+import { ChevronRightIcon, FolderIcon, InstallIcon, LinkIcon, LogoutIcon, PersonIcon, ServerIcon } from "../components/icons";
 
 export function SettingsPage() {
   const { userEmail, userId, logout } = useSession();
@@ -110,6 +110,16 @@ export function SettingsPage() {
               <FolderIcon className="text-base text-ios-blue" />
               <span className="flex-1 text-base font-semibold text-ios-label">Virtual Directories</span>
               <span className="text-sm text-ios-secondary/50">{ownVdirs.length}</span>
+              <ChevronRightIcon className="text-xs text-ios-secondary/30" />
+            </button>
+            <button
+              type="button"
+              data-testid="settings-apps"
+              onClick={() => void navigate("/settings/apps")}
+              className="flex w-full items-center gap-3 px-4 py-3.5 text-left active:bg-ios-bg"
+            >
+              <LinkIcon className="text-base text-ios-blue" />
+              <span className="flex-1 text-base font-semibold text-ios-label">Connected apps</span>
               <ChevronRightIcon className="text-xs text-ios-secondary/30" />
             </button>
           </div>

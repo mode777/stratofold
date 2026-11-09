@@ -30,6 +30,7 @@ here are what the proposal must declare. Process rules: `openspec/config.yaml`.
 | R5 | Large uploads buffered in RAM/disk on the host | Violates "stream, don't cache" | 5 |
 | R6 | Retry mechanism partially applies or duplicates mutations | Data integrity | 1, 5 |
 | R7 | SPA upload queue can't reliably upload in background | Vision's UX promise | 8 |
+| R8 | Third-party access credential leaks or is over-broad | A frontend-only site cannot keep a secret; an unscoped bearer token is full-account access | 10, 11 |
 
 ## Changes, in order
 
@@ -213,12 +214,139 @@ conceptually.
   - Graceful shutdown: in-flight requests drained or failed cleanly.
   - Image size budget gate (e.g. < 100 MB, tunable) recorded in CI.
 
+### 10. `add-vdir-access-tokens` — vdir-scoped bearer access for third-party apps
+
+Option B from the 2026-11 exploration: a user mints a read-only or
+read/write token bound to exactly one vdir and hands it to a client.
+This is the credential primitive the client library (change 11) rides
+on. PocketBase impersonation is explicitly rejected: it is
+superuser-only, unscoped, and revocable only by rotating the user's
+token key (which signs out every device).
+
+- **Goal**: a `vdir_tokens` collection (`user`, `vdir`, `role`, `name`,
+  `token_hash`, `token_prefix`/last4, `expires_at`, `last_used_at`) with
+  no record-API rules; mint/list/revoke under `/api/sf/tokens` using the
+  existing `sf_session` cookie; accept `Authorization: Bearer sf_v1_…`
+  on the `/api/sf/vdirs/*` filesystem routes, `/files` for non-public
+  vdirs, and the `/s` mint route. A token's effective access is
+  `min(token role, vdirauthz.Resolve(user, vdir))`, re-resolved on every
+  request, so share removal, role changes, un-publishing, and deletion
+  take effect immediately. The owner or a share holder may mint a token
+  capped at their current role; tokens never outlive the grant. Tokens
+  are stored only as SHA-256 hashes and shown once at mint. Private
+  media URLs come from `/s`; tokens never appear in a URL, and a link
+  minted by a token is revoked when that token is revoked (links record
+  the minting token id). Settings gets a "Connected apps" screen to
+  name, expire, list, and revoke tokens and show last use.
+- **Specs**: `vdir-access-tokens` (new); deltas to `filesystem-api`,
+  `file-server`, `file-links`, `web-ui`.
+- **ADRs**: 0012 — scoped capability tokens for third-party access.
+- **Out of scope**: per-visitor consent/OAuth (change 12), multi-vdir
+  tokens, subpath scopes, token-bound origin allowlists as a security
+  boundary, and the iframe bridge.
+- **Validation**:
+  - Go auth matrix: cookie vs bearer; valid/expired/revoked; token used
+    on the wrong vdir; read-only token cannot write; `editor` token on a
+    `viewer` share still cannot write; anonymous public access unchanged;
+    every denial happens before an SSH dial.
+  - Revocation: deleting the token, the vdir, the user, or the user's
+    share ends access on the next request; token plaintext never appears
+    in the database, API responses, or request logs.
+  - Media: a bearer-minted `/s` link serves Range/conditional requests;
+    revoking the minting token kills that link immediately.
+  - CORS: a preflight from a foreign `Origin` allows `Authorization`,
+    and the SDK-readable headers (`Content-Range`, `ETag`, …) are
+    exposed.
+  - Component tests for the Settings mint/list/revoke screen;
+    `openspec validate --all --strict`.
+
+### 11. `add-client-library` — typed browser SDK + instance-hosted embed
+
+The integration surface for frontend-only sites. It consumes change
+10's scoped bearer tokens and adds no authorization semantics of its own.
+
+- **Goal**: a zero-dependency TypeScript package (`@stratofold/client`)
+  with ESM and IIFE builds plus bundled types; `list`, `read`, `upload`
+  (progress/abort), `mkdir`, `move`, `remove`, `temporaryUrl`, public
+  mode, and the SPA's deterministic error classes. Header auth only;
+  private media via minted `/s` URLs. Each instance serves the bundle at
+  `/embed/v<major>/stratofold.js` (embedded in the binary), while npm is
+  the source of truth (jsDelivr/unpkg provide the public CDN). The embed
+  infers `baseUrl` from its own URL; npm users pass it explicitly. Docs
+  state the token-audience rule: a token shipped in a public bundle is
+  public.
+- **Specs**: `client-library` (new); delta to `deployment` (embed route,
+  release artifact).
+- **ADRs**: 0013 — client distribution (npm source of truth plus
+  per-instance embed mirror).
+- **Out of scope**: React/Vue wrappers, a central `cdn.stratofold.app`,
+  Node upload progress, offline/service-worker behavior, and the
+  per-visitor connect flow (change 12).
+- **Validation**:
+  - Unit: every operation against a fake fetch/XHR; error mapping;
+    upload progress/abort; `temporaryUrl` expiry/reuse; public mode;
+    base-URL inference; the token never appears in a URL.
+  - Bundle: ESM + IIFE smoke tests, zero runtime dependencies, types
+    compile.
+  - Cross-origin E2E on the verification server: a second-origin fixture
+    page loads the built `/embed` bundle, lists, uploads, range-reads,
+    and downloads against the harness; assert preflights and no token in
+    any URL.
+  - `openspec validate --all --strict`.
+
+## Conditional follow-ons
+
+Not scheduled. Start only when a concrete integration needs them; neither
+is a prerequisite for changes 10–11.
+
+### 12. `add-app-connect-flow` — per-visitor authorization
+
+Trigger: a multi-user third-party site where each visitor connects their
+own account (Option C from the exploration).
+
+- **Goal**: a device-code flow first (site shows a short code, the user
+  approves vdir/role at Stratofold, the site polls for a scoped token),
+  with the popup + `postMessage` handshake as a later UX upgrade. The
+  user's existing `sf_session` authorizes the approval; the resulting
+  credential is a change-10 token bound to that user and vdir.
+- **Specs**: `app-connect-flow` (new); deltas to `vdir-access-tokens`,
+  `web-ui`.
+- **ADRs**: 0014 — connect flow and consent.
+- **Out of scope**: registered OAuth clients and refresh tokens (change
+  13), iframe bridge, and third-party cookie reliance.
+- **Validation**: device-code matrix (expiry, single use, approval,
+  denial, scope display, revoke before poll, no token in the activation
+  URL); component tests for the approval screen; cross-origin E2E.
+
+### 13. `add-oauth-pkce` — standard third-party app authorization
+
+Trigger: an ecosystem of independent third-party apps, or integrations
+that need standard refresh/rotation semantics.
+
+- **Goal**: authorization-code + PKCE public clients, client
+  registration, redirect-URI allowlists, short-lived access tokens,
+  rotating refresh tokens with reuse detection, and standard revocation.
+- **Specs**: `oauth-pkce` (new); deltas to `vdir-access-tokens`,
+  `web-ui`, `deployment`.
+- **ADRs**: 0015 — OAuth 2.1 public-client profile.
+- **Out of scope**: confidential clients, dynamic client registration,
+  and acting as a general identity provider.
+- **Validation**: PKCE/redirect-URI/state matrices, refresh rotation and
+  reuse detection, revocation, consent-scope tests, cross-origin E2E.
+
 ## Sequencing notes
 
 - 1 → 2 → 3 are strictly sequential (each builds on the previous seam).
 - 4, 5, 6 can partially parallelize after 3 (read path / write path /
   authz), but 6 touches both.
 - 7 needs the API of 4–5; 8 builds on 7; 9 is last.
+- 10 is the first post-core change: it builds on the vdir/authz seams
+  from 3 and 6 and the `/s` machinery from the expiring-links change.
+- 11 builds on 10 and the existing SPA-facing API (4, 5); its only
+  server-side addition is the `/embed` route.
+- 12 and 13 are gated follow-ons: do not start them until the trigger
+  in each entry is real. Option B (10 + 11) is the chosen first step and
+  does not depend on them.
 - Start each change with the `openspec-propose` skill; archive with
   `openspec-archive-change` so specs under `openspec/specs/` stay the
   source of truth.
