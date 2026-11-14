@@ -17,6 +17,7 @@ import (
 	"github.com/pkg/sftp"
 	"github.com/pocketbase/pocketbase/core"
 
+	"github.com/mode777/stratofold/internal/fileversion"
 	"github.com/mode777/stratofold/internal/sshconn"
 	"github.com/mode777/stratofold/internal/ssherr"
 	"github.com/mode777/stratofold/internal/vdir"
@@ -47,8 +48,12 @@ var (
 // sentinels; unknown errors stay conservatively retryable (ssherr's
 // contract) and the attempt bound still fails them loudly.
 func classify(err error) ssherr.Class {
+	var precondition *preconditionError
 	switch {
-	case errors.Is(err, errNotADirectory), errors.Is(err, errConflict):
+	case errors.As(err, &precondition):
+		return ssherr.Permanent
+	case errors.Is(err, errNotADirectory), errors.Is(err, errConflict),
+		errors.Is(err, fileversion.ErrStore):
 		return ssherr.Permanent
 	default:
 		return ssherr.Classify(err)
@@ -90,11 +95,17 @@ func withRetry(ctx context.Context, p sshconn.ClientProvider, maxAttempts int, f
 // shape → 400; retryable-class (including exhausted budgets and
 // unreachable hosts) → 503; everything else → 500.
 func httpStatus(err error) int {
+	var precondition *preconditionError
+	if errors.As(err, &precondition) {
+		return http.StatusPreconditionFailed
+	}
 	switch {
 	case err == nil:
 		return http.StatusOK
 	case errors.Is(err, errBadRequest):
 		return http.StatusBadRequest
+	case errors.Is(err, fileversion.ErrStore):
+		return http.StatusInternalServerError
 	case errors.Is(err, ErrRetriesExhausted):
 		return http.StatusServiceUnavailable
 	case errors.Is(err, vdir.ErrEscape),
@@ -131,6 +142,14 @@ func httpStatus(err error) int {
 
 // respondErr writes the mapped error as a PocketBase API error body.
 func respondErr(e *core.RequestEvent, err error) error {
+	var precondition *preconditionError
+	if errors.As(err, &precondition) {
+		body := map[string]any{"message": "Precondition failed"}
+		if precondition.hasVersion {
+			body["version"] = precondition.version
+		}
+		return e.JSON(http.StatusPreconditionFailed, body)
+	}
 	switch httpStatus(err) {
 	case http.StatusBadRequest:
 		return e.BadRequestError("Invalid request", err) // TEMP debug

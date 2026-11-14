@@ -1,0 +1,127 @@
+# Builds and publishes @stratofold/client to npm.
+#
+# Trigger: pushing a version tag matching `v*` (for example `v0.2.0`).
+# This runs independently of the server image release;
+# branch pushes never publish the package.
+#
+# Authentication: npm trusted publishing (OIDC). Do not add a
+# long-lived npm publish token. The package must already exist on npm and
+# have a trusted-publisher entry for mode777/stratofold and this workflow
+# filename with direct `npm publish` permission (see client/README.md).
+#
+# The release tag must equal the version in client/package.json. An
+# already-published version is a successful no-op.
+name: release-client
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: release-client-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a version tag
+        if: github.ref_type != 'tag'
+        run: |
+          echo "release-client only runs on v* tags" >&2
+          exit 1
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Check toolchain and release metadata
+        id: release
+        working-directory: client
+        run: |
+          set -euo pipefail
+
+          case "$GITHUB_REF_NAME" in
+            v*) ;;
+            *)
+              echo "release-client requires a tag matching v*" >&2
+              exit 1
+              ;;
+          esac
+
+          npm_version="$(npm --version)"
+          node -e '
+            const [major, minor, patch] = process.argv[1].split(".").map(Number);
+            if (major < 11 || (major === 11 && (minor < 5 || (minor === 5 && patch < 1)))) {
+              console.error(`npm ${process.argv[1]} is too old; trusted publishing needs >= 11.5.1`);
+              process.exit(1);
+            }
+          ' "$npm_version"
+
+          tag_version="${GITHUB_REF_NAME#v}"
+          package_version="$(node -p "require('./package.json').version")"
+          if [ "$tag_version" != "$package_version" ]; then
+            echo "release tag v${tag_version} does not match client/package.json ${package_version}" >&2
+            exit 1
+          fi
+
+          repository_url="$(node -p "require('./package.json').repository.url")"
+          normalized="${repository_url#git+}"
+          normalized="${normalized%.git}"
+          normalized="${normalized%/}"
+          expected="https://github.com/${GITHUB_REPOSITORY}"
+          if [ "$normalized" != "$expected" ]; then
+            echo "client/package.json repository.url ${repository_url} does not match ${expected}" >&2
+            exit 1
+          fi
+
+          echo "version=${tag_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Skip an already-published version
+        id: published
+        working-directory: client
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          if published="$(npm view "@stratofold/client@${VERSION}" version 2>/dev/null)" \
+            && [ "$published" = "$VERSION" ]; then
+            echo "@stratofold/client@${VERSION} is already published; nothing to do"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install
+        if: steps.published.outputs.exists != 'true'
+        working-directory: client
+        run: npm ci
+
+      - name: Test
+        if: steps.published.outputs.exists != 'true'
+        working-directory: client
+        run: npm test
+
+      - name: Type-check README snippets
+        if: steps.published.outputs.exists != 'true'
+        working-directory: client
+        run: npm run typecheck:readme
+
+      - name: Check publish tarball
+        if: steps.published.outputs.exists != 'true'
+        working-directory: client
+        run: node scripts/check-pack.mjs
+
+      - name: Publish
+        if: steps.published.outputs.exists != 'true'
+        working-directory: client
+        run: npm publish --access public

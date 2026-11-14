@@ -46,9 +46,9 @@ feature shipped by the server.
   major version. The SPA keeps its own cookie-oriented wrappers in
   `web/src/lib/filesApi.ts`; migrating them onto the package is a
   separate decision.
-- Distribution needs npm-scope ownership (`@stratofold`) and an explicit
-  publish step; the change prepares the package but does not automate
-  publishing.
+- Distribution needs npm-scope ownership (`@stratofold`) and a publish
+  step. Publishing is automated on `v*` tags by
+  `.github/workflows/release-client.yaml`; see ADR 0014.
 - The Pages site is public, so it can never carry a token or a default
   instance URL. Builds refuse to run when `VITE_SF_*` values are set,
   and CI scans the bundle.

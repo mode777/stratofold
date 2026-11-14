@@ -1,6 +1,6 @@
 {
   "name": "@stratofold/client",
-  "version": "0.1.0",
+  "version": "0.11.0",
   "description": "Typed, zero-dependency browser client for Stratofold vdir-scoped bearer access",
   "license": "ISC",
   "type": "module",

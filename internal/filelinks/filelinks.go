@@ -3,6 +3,7 @@ package filelinks
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime"
 	"net/http"
@@ -165,8 +166,14 @@ func handleServe(e *core.RequestEvent) error {
 	}
 
 	virtualPath := link.GetString("path")
-	res, st, err := fileserver.StatResolved(e.Request.Context(), e.App, vd.Id, virtualPath)
-	if err != nil || st.IsDir() {
+	res, st, version, err := fileserver.StatResolved(e.Request.Context(), e.App, vd.Id, virtualPath)
+	if err != nil {
+		if errors.Is(err, fileserver.ErrVersionStore) {
+			return e.InternalServerError("Internal error", nil)
+		}
+		return e.NotFoundError("Not found", nil)
+	}
+	if st.IsDir() {
 		return e.NotFoundError("Not found", nil)
 	}
 
@@ -176,5 +183,5 @@ func handleServe(e *core.RequestEvent) error {
 	} else {
 		e.Response.Header().Set("Content-Disposition", "inline")
 	}
-	return fileserver.ServeFile(e, e.Request.Context(), res, st, name)
+	return fileserver.ServeFile(e, e.Request.Context(), res, st, version, name)
 }

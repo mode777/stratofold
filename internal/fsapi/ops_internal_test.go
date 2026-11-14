@@ -10,6 +10,7 @@ import (
 
 	"github.com/pkg/sftp"
 
+	"github.com/mode777/stratofold/internal/fileversion"
 	"github.com/mode777/stratofold/internal/ssherr"
 	"github.com/mode777/stratofold/internal/testssh"
 	"github.com/mode777/stratofold/internal/vdir"
@@ -116,6 +117,7 @@ func TestHTTPStatusMapping(t *testing.T) {
 		{"os permission", fmt.Errorf("wrap: %w", os.ErrPermission), 403},
 		{"sftp permission denied", sftp.ErrSSHFxPermissionDenied, 403},
 		{"conflict is permanent 500", fmt.Errorf("wrap: %w", errConflict), 500},
+		{"version store failure is 500", fmt.Errorf("wrap: %w", fileversion.ErrStore), 500},
 		{"unresumable resume guard is permanent 500", fmt.Errorf("wrap: %w", ssherr.ErrResumeImpossible), 500},
 		{"host key mismatch is permanent 500", ssherr.ErrHostKeyMismatch, 500},
 		{"unknown is retryable 503", errors.New("mystery"), 503},

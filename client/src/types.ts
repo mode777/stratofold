@@ -6,6 +6,19 @@ export type LsEntry = {
   size: number;
   dir: boolean;
   modtime: string;
+  /** Opaque content version; the ETag is its quoted form. */
+  version: string;
+};
+
+/** Single-path metadata from the filesystem API. */
+export type StatEntry = {
+  path: string;
+  name: string;
+  kind: "file" | "directory";
+  size: number;
+  mtime: string;
+  /** Opaque content version; the ETag is its quoted form. */
+  version: string;
 };
 
 /** The non-secret scope of the configured bearer token. */
@@ -38,6 +51,16 @@ export type UploadOptions = {
   /** Called with transferred and total bytes when the browser reports them. */
   onProgress?: (loaded: number, total: number) => void;
   /** Aborts the in-flight upload; rejects with UploadCanceled. */
+  signal?: AbortSignal;
+  /**
+   * Strong conditional upload: the unquoted version from `stat`/`ls`,
+   * or `"*"` to require that the target exists. Omit for create-or-replace.
+   */
+  ifVersion?: string;
+};
+
+export type StatOptions = {
+  /** Aborts the request; the signal is forwarded to fetch. */
   signal?: AbortSignal;
 };
 

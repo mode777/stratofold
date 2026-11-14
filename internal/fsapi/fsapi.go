@@ -29,9 +29,11 @@ import (
 	"github.com/pocketbase/pocketbase/tools/hook"
 	"github.com/pocketbase/pocketbase/tools/router"
 
+	"github.com/mode777/stratofold/internal/fileversion"
 	"github.com/mode777/stratofold/internal/requestauth"
 	"github.com/mode777/stratofold/internal/sftpreadwrite"
 	"github.com/mode777/stratofold/internal/sshconn"
+	"github.com/mode777/stratofold/internal/ssherr"
 	"github.com/mode777/stratofold/internal/vdir"
 	"github.com/mode777/stratofold/internal/vdirpath"
 )
@@ -48,6 +50,7 @@ type Route struct {
 func CustomRoutes() []Route {
 	return []Route{
 		{http.MethodPost, "/api/sf/vdirs/{vdirId}/ls"},
+		{http.MethodPost, "/api/sf/vdirs/{vdirId}/stat"},
 		{http.MethodPost, "/api/sf/vdirs/{vdirId}/mkdir"},
 		{http.MethodPost, "/api/sf/vdirs/{vdirId}/mv"},
 		{http.MethodPost, "/api/sf/vdirs/{vdirId}/rm"},
@@ -65,6 +68,7 @@ func RegisterRoutes(g *router.RouterGroup[*core.RequestEvent], middlewares ...*h
 	sub := g.Group("/api/sf/vdirs")
 	sub.Bind(middlewares...)
 	sub.POST("/{vdirId}/ls", handleLs)
+	sub.POST("/{vdirId}/stat", handleStat)
 	sub.POST("/{vdirId}/mkdir", handleMkdir)
 	sub.POST("/{vdirId}/mv", handleMv)
 	sub.POST("/{vdirId}/rm", handleRm)
@@ -100,12 +104,15 @@ func bindPathBody(e *core.RequestEvent, allowEmpty bool) (pathBody, error) {
 	return b, nil
 }
 
-// entry is one listing row.
+// entry is one listing row. fi is the raw ReadDir FileInfo used to
+// derive the version; it is never serialized.
 type entry struct {
-	Name    string `json:"name"`
-	Size    int64  `json:"size"`
-	Dir     bool   `json:"dir"`
-	ModTime string `json:"modtime"`
+	Name    string      `json:"name"`
+	Size    int64       `json:"size"`
+	Dir     bool        `json:"dir"`
+	ModTime string      `json:"modtime"`
+	Version string      `json:"version"`
+	fi      os.FileInfo `json:"-"`
 }
 
 func handleLs(e *core.RequestEvent) error {
@@ -140,7 +147,97 @@ func handleLs(e *core.RequestEvent) error {
 	if err != nil {
 		return respondErr(e, err)
 	}
+
+	// The generation lookup is local and idempotent: fill it outside the
+	// retry closure so a database error is 500, not a remote retry.
+	infos := make([]fileversion.Entry, len(entries))
+	for i := range entries {
+		infos[i] = fileversion.Entry{Name: entries[i].Name, Info: entries[i].fi}
+	}
+	versions, err := fileversion.VersionsForDir(e.App, vdirID, res.ConnectionID, res.RemotePath, infos)
+	if err != nil {
+		return respondErr(e, err)
+	}
+	for i := range entries {
+		entries[i].Version = versions[entries[i].Name]
+	}
 	return e.JSON(http.StatusOK, map[string]any{"path": body.Path, "entries": entries})
+}
+
+// statResponse is the single-path metadata contract. It deliberately
+// never exposes the remote path.
+type statResponse struct {
+	Path    string `json:"path"`
+	Name    string `json:"name"`
+	Kind    string `json:"kind"`
+	Size    int64  `json:"size"`
+	ModTime string `json:"mtime"`
+	Version string `json:"version"`
+}
+
+// handleStat describes one sandbox-resolved path without listing its
+// parent. Order matches ls: record → authz → body → resolution → stat
+// → version, so a rejected request never dials.
+func handleStat(e *core.RequestEvent) error {
+	vdirID := e.Request.PathValue("vdirId")
+	ctx := e.Request.Context()
+
+	vd, err := e.App.FindRecordById("vdirs", vdirID)
+	if err != nil {
+		return respondErr(e, err)
+	}
+	if _, err := requestauth.AuthorizeVdir(e, vd, false); err != nil {
+		return err
+	}
+	body, err := bindPathBody(e, true)
+	if err != nil {
+		return respondErr(e, err)
+	}
+	lexical, err := vdirpath.Resolve(body.Path)
+	if err != nil {
+		return respondErr(e, err)
+	}
+
+	res, err := vdir.NewResolver(e.App).Resolve(ctx, vdirID, body.Path)
+	if err != nil {
+		return respondErr(e, err)
+	}
+
+	var st os.FileInfo
+	err = withRetry(ctx, res.Provider, MaxAttempts, func(cl *sftp.Client) error {
+		fi, serr := cl.Stat(res.RemotePath)
+		if serr == nil {
+			st = fi
+		}
+		return serr
+	})
+	if err != nil {
+		return respondErr(e, err)
+	}
+
+	version, err := fileversion.Version(e.App, res.VdirID, res.ConnectionID, res.RemotePath, st)
+	if err != nil {
+		return respondErr(e, err)
+	}
+
+	name := vd.GetString("name")
+	if lexical != "" {
+		name = path.Base(lexical)
+	}
+	kind := "file"
+	size := st.Size()
+	if st.IsDir() {
+		kind = "directory"
+		size = 0
+	}
+	return e.JSON(http.StatusOK, statResponse{
+		Path:    body.Path,
+		Name:    name,
+		Kind:    kind,
+		Size:    size,
+		ModTime: st.ModTime().UTC().Format(time.RFC3339),
+		Version: version,
+	})
 }
 
 // readDirEntries lists one remote directory (a pure read: retry-safe
@@ -165,6 +262,7 @@ func readDirEntries(cl *sftp.Client, dir string) ([]entry, error) {
 			Size:    en.Size(),
 			Dir:     en.IsDir(),
 			ModTime: en.ModTime().UTC().Format(time.RFC3339),
+			fi:      en,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -256,7 +354,20 @@ func handleMv(e *core.RequestEvent) error {
 	if err != nil {
 		return respondErr(e, err)
 	}
+	// Bookkeeping only: a completed move must not fail because the
+	// version store did. This keeps a same-size/same-second replacement
+	// observable without changing mv's request semantics.
+	recordMovedTarget(e.App, vdirID, target)
 	return e.NoContent(http.StatusNoContent)
+}
+
+// bumpMovedTarget is a seam for the best-effort mv bookkeeping test.
+var bumpMovedTarget = fileversion.Bump
+
+func recordMovedTarget(app core.App, vdirID, target string) {
+	if _, err := bumpMovedTarget(app, vdirID, target); err != nil {
+		app.Logger().Warn("fsapi: mv version bump failed", "vdir", vdirID, "path", target, "error", err)
+	}
 }
 
 func handleRm(e *core.RequestEvent) error {
@@ -332,6 +443,13 @@ func handleUpload(e *core.RequestEvent) error {
 		return respondErr(e, fmt.Errorf("%w: upload needs a path query parameter", errBadRequest))
 	}
 
+	// Parse before resolving so a malformed precondition is 400 without
+	// waking a connection.
+	im, err := parseIfMatch(e.Request.Header.Values("If-Match"))
+	if err != nil {
+		return respondErr(e, err)
+	}
+
 	anch, err := vdir.NewResolver(e.App).ResolveAncestor(ctx, vdirID, virtualPath)
 	if err != nil {
 		return respondErr(e, err)
@@ -349,6 +467,17 @@ func handleUpload(e *core.RequestEvent) error {
 		target = dir + "/" + anch.Remaining[0]
 	default:
 		return respondErr(e, fmt.Errorf("fsapi: upload: parent of %q missing: %w", virtualPath, os.ErrNotExist))
+	}
+
+	// Advisory check: fail before streaming a body that can never
+	// publish. The publish-time check below is authoritative.
+	if im.present {
+		if len(anch.Remaining) == 1 {
+			return respondErr(e, &preconditionError{})
+		}
+		if err := checkIfMatch(ctx, e.App, vdirID, anch.ConnectionID, anch.Provider, target, im); err != nil {
+			return respondErr(e, err)
+		}
 	}
 
 	temp, err := tempName(dir, path.Base(target))
@@ -378,10 +507,28 @@ func handleUpload(e *core.RequestEvent) error {
 		return respondErr(e, err)
 	}
 
+	pub := &conditionalPublisher{
+		app:          e.App,
+		vdirID:       vdirID,
+		connectionID: anch.ConnectionID,
+		target:       target,
+		temp:         temp,
+		im:           im,
+	}
 	err = withRetry(ctx, anch.Provider, MaxAttempts, func(cl *sftp.Client) error {
-		return publish(cl, temp, target)
+		return pub.publish(cl)
 	})
 	if err != nil {
+		// A permanent failure after the reservation (e.g. a directory at
+		// the target) must undo it. Retry exhaustion deliberately leaves
+		// the bump in place: the rename may have applied before the last
+		// error, and an over-rotated version is safe while an
+		// under-rotated one is not.
+		if pub.reserved != 0 && !pub.published && classify(err) == ssherr.Permanent {
+			if rerr := fileversion.Rollback(e.App, vdirID, target, pub.reserved); rerr != nil {
+				e.App.Logger().Warn("fsapi: upload version rollback failed", "error", rerr)
+			}
+		}
 		abandonTemp(ctx, anch.Provider, temp)
 		return respondErr(e, err)
 	}

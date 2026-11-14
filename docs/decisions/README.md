@@ -23,6 +23,8 @@ directory holds only what stays true after a change is archived.
 | 0011 | Accepted | Chromecast via the Web Sender SDK and the Default Media Receiver |
 | 0012 | Accepted | Vdir-scoped access tokens for third-party clients |
 | 0013 | Accepted | Client distribution: npm package, no instance-hosted embed |
+| 0014 | Accepted | Client package publishes to npm from CI on `v*` tags |
+| 0015 | Accepted | Content versions from publication generations plus remote signatures |
 
 ## Adding a decision
 

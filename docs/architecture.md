@@ -75,8 +75,13 @@ Covers what PocketBase cannot: operations against remote hosts.
   exposing a user directory.
 - `POST /api/sf/vdirs/{id}/ls` — directory listing (JSON body
   `{"path": …}`, the vdir root when empty) returning entries with
-  name, size, directory flag, and modification time; listing is part
-  of the API per the vision.
+  name, size, directory flag, modification time, and the opaque content
+  `version`; listing is part of the API per the vision.
+- `POST /api/sf/vdirs/{id}/stat` — single-path metadata
+  (`{"path": …}`, empty = root) without listing the parent: `path`,
+  `name`, `kind` (`file`/`directory`), `size` (0 for directories),
+  `mtime` (RFC3339), and the same `version`; access and errors follow
+  `ls`, and remote paths are never exposed.
 - `POST /api/sf/vdirs/{id}/mkdir`, `/mv`, `/rm` — remote filesystem
   mutations (`mkdir` creates missing parents and tolerates an existing
   directory; `mv` is an SFTP rename that replaces an existing target
@@ -94,7 +99,11 @@ Covers what PocketBase cannot: operations against remote hosts.
   host. Bytes land under a temporary name next to the target and are
   renamed into place only after the final byte is acknowledged — an
   interrupted upload leaves no file at the target path, and a
-  mid-upload disconnect resumes at the last acknowledged offset.
+  mid-upload disconnect resumes at the last acknowledged offset. An
+  optional strong `If-Match` precondition is re-checked at publish
+  time; a stale target returns `412` (with the current version when it
+  exists), publishes nothing, and removes the temp. Without the header
+  the upload keeps create-or-replace semantics.
 - Public equivalents of read-only operations (`ls`) exist for virtual
   directories marked public, without authentication; writes require the
   owner's session or an `editor` share on every vdir (public never
@@ -123,7 +132,11 @@ static file server: single-range HTTP Range requests (`206`/`416`;
 malformed or multi-range headers are ignored and served in full),
 `ETag`/`Last-Modified` with `If-None-Match`/`If-Modified-Since`
 conditionals (`304`, validators before Range), a built-in deterministic
-mime table, and `index.html` resolution for directory URLs
+mime table, and `index.html` resolution for directory URLs. The `ETag`
+is the quoted strong content version shared with `ls`, `stat`, and
+conditional upload (ADR 0015), so a same-size save inside one second
+rotates it; `Last-Modified`, conditional-GET precedence, Range, and
+`HEAD` semantics are unchanged
 (unslashed directory URLs redirect to the slashed form; no autoindex —
 listing stays API-only). Routed through the virtual directory to its
 SSH connection and streamed via SFTP offset reads — no host-side
@@ -262,6 +275,7 @@ in-app navigation only (see the Upload flow).
 | `vdir_shares` | vdir (rel, cascade), user (rel, cascade), role (`viewer`/`editor`), unique(vdir, user) | owner-managed via API rules; the grantee sees their own shares; drives both the record-API read extension and the `/api/sf` + `/files` middleware |
 | `vdir_tokens` | user (rel, cascade), vdir (rel, cascade), name, role (`viewer`/`editor`), token_hash (unique), token_hint, expires_at, last_used_at | rows are created/read only by the custom `/api/sf/tokens` routes; record rules are unset (superuser-only); plaintext lives only in the mint response; access is re-resolved against the user's current grant per request (ADR 0012) |
 | `file_links` | vdir (rel, cascade), path (virtual), created_by (rel, cascade), token_hash (unique), expires_at, minted_by_token (rel, nullable, cascade) | rows are created/read only by the custom mint and `/s/` routes; record rules are unset (superuser-only); tokens live only as a SHA-256 hash; fixed 24h expiry, creator access re-checked per redemption; a token-minted link also requires its source token to be live |
+| `file_versions` | vdir (rel, cascade), remote_path, generation | internal publication counters only (no content/size/mtime/hash), unique per (vdir, remote_path); record rules are unset; every upload bumps the counter before its rename, and `mv` bumps the target best-effort; this is the version store behind `ls`/`stat`/ETag/`If-Match`, not a file cache (ADR 0015) |
 
 Every path operation through a vdir goes through one internal seam:
 lexical anchoring under the vdir root, then a server-side walk that
@@ -326,6 +340,10 @@ reaches the raw URL in the browser's own player.
 **Upload** — the SPA's in-app upload manager queues selected files and
 streams each as a request body to `/api/sf/.../upload`, which writes to
 SFTP as bytes arrive; progress comes from the transport's upload events.
+A conditional upload additionally sends `If-Match` with the version it
+read from `stat`/`ls`; the server checks it again under a per-target
+publication lock immediately before the atomic rename and returns `412`
+without publishing if another writer got there first.
 The queue is in-memory, FIFO, one upload at a time, and survives in-app
 navigation (only a reload or tab close ends it). "Pause" stops
 dispatching (an active upload finishes or is canceled); "cancel" aborts

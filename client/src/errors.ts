@@ -6,6 +6,7 @@ export type FailureKind =
   | "unauthorized"
   | "forbidden"
   | "notfound"
+  | "conflict"
   | "retryable"
   | "rejected"
   | "server";
@@ -22,12 +23,15 @@ export class ConfigurationError extends Error {
 export class StratofoldError extends Error {
   readonly kind: FailureKind;
   readonly status: number;
+  /** The current version supplied by a 412 response, when present. */
+  readonly version?: string;
 
-  constructor(kind: FailureKind, status: number, message: string) {
+  constructor(kind: FailureKind, status: number, message: string, version?: string) {
     super(message);
     this.name = "StratofoldError";
     this.kind = kind;
     this.status = status;
+    this.version = version;
   }
 }
 
@@ -47,6 +51,8 @@ export function failureKind(status: number): FailureKind {
       return "forbidden";
     case 404:
       return "notfound";
+    case 412:
+      return "conflict";
     case 503:
       return "retryable";
     default:
@@ -54,8 +60,12 @@ export function failureKind(status: number): FailureKind {
   }
 }
 
-export function failureFor(status: number, message: string): StratofoldError {
-  return new StratofoldError(failureKind(status), status, message);
+export function failureFor(
+  status: number,
+  message: string,
+  version?: string,
+): StratofoldError {
+  return new StratofoldError(failureKind(status), status, message, version);
 }
 
 /** A transport failure that never produced an HTTP status. */

@@ -1,7 +1,6 @@
 package fileserver
 
 import (
-	"fmt"
 	"net/http"
 	"os"
 	"path"
@@ -65,10 +64,9 @@ func httpTime(t time.Time) string {
 	return t.UTC().Format(http.TimeFormat)
 }
 
-// entityTag derives a strong ETag from the remote stat (design D4):
-// size and modification second, hex-encoded, quoted.
-func entityTag(st os.FileInfo) string {
-	return fmt.Sprintf(`"%x-%x"`, st.Size(), st.ModTime().Unix())
+// entityTag is the quoted strong form of the shared content version.
+func entityTag(version string) string {
+	return `"` + version + `"`
 }
 
 // notModified evaluates the conditional request headers (design D4):

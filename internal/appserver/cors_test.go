@@ -18,14 +18,16 @@ func TestCrossOriginPreflightForClientRoutes(t *testing.T) {
 	s := testapp.Start(t)
 
 	paths := []struct {
-		name   string
-		path   string
-		method string
+		name    string
+		path    string
+		method  string
+		headers string
 	}{
-		{"list", "/api/sf/vdirs/any/ls", http.MethodPost},
-		{"upload", "/api/sf/vdirs/any/upload", http.MethodPost},
-		{"link mint", "/api/sf/vdirs/any/links", http.MethodPost},
-		{"token scope", "/api/sf/tokens/me", http.MethodGet},
+		{"list", "/api/sf/vdirs/any/ls", http.MethodPost, "authorization,content-type"},
+		{"stat", "/api/sf/vdirs/any/stat", http.MethodPost, "authorization,content-type"},
+		{"upload", "/api/sf/vdirs/any/upload", http.MethodPost, "authorization,content-type,if-match"},
+		{"link mint", "/api/sf/vdirs/any/links", http.MethodPost, "authorization,content-type"},
+		{"token scope", "/api/sf/tokens/me", http.MethodGet, "authorization,content-type"},
 	}
 
 	for _, tc := range paths {
@@ -36,7 +38,7 @@ func TestCrossOriginPreflightForClientRoutes(t *testing.T) {
 			}
 			req.Header.Set("Origin", "https://client.example")
 			req.Header.Set("Access-Control-Request-Method", tc.method)
-			req.Header.Set("Access-Control-Request-Headers", "authorization,content-type")
+			req.Header.Set("Access-Control-Request-Headers", tc.headers)
 
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
@@ -51,8 +53,8 @@ func TestCrossOriginPreflightForClientRoutes(t *testing.T) {
 				t.Fatalf("allow-origin = %q", origin)
 			}
 			allowed := strings.ToLower(resp.Header.Get("Access-Control-Allow-Headers"))
-			for _, header := range []string{"authorization", "content-type"} {
-				if !strings.Contains(allowed, header) {
+			for _, header := range strings.Split(tc.headers, ",") {
+				if header = strings.TrimSpace(header); !strings.Contains(allowed, header) {
 					t.Fatalf("allow-headers = %q, missing %s", allowed, header)
 				}
 			}

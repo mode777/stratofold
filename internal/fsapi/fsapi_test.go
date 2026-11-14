@@ -274,6 +274,7 @@ type lsEntry struct {
 	Size    int64  `json:"size"`
 	Dir     bool   `json:"dir"`
 	ModTime string `json:"modtime"`
+	Version string `json:"version"`
 }
 
 func lsEntries(t *testing.T, resp *http.Response) []lsEntry {

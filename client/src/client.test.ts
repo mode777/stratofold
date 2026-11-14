@@ -140,6 +140,7 @@ describe("error classification", () => {
     [401, "unauthorized"],
     [403, "forbidden"],
     [404, "notfound"],
+    [412, "conflict"],
     [400, "rejected"],
     [503, "retryable"],
     [500, "server"],
@@ -180,7 +181,13 @@ describe("listening and reading", () => {
     const { fetch, calls } = fakeFetch(() =>
       jsonResponse(200, {
         entries: [
-          { name: "a.txt", size: 3, dir: false, modtime: "2026-01-01T00:00:00Z" },
+          {
+            name: "a.txt",
+            size: 3,
+            dir: false,
+            modtime: "2026-01-01T00:00:00Z",
+            version: "v1-listed",
+          },
         ],
       }),
     );
@@ -188,6 +195,7 @@ describe("listening and reading", () => {
     const entries = await c.list();
     expect(entries).toHaveLength(1);
     expect(entries[0]?.name).toBe("a.txt");
+    expect(entries[0]?.version).toBe("v1-listed");
     expect(calls[0]?.url).toBe("https://files.example.com/api/sf/vdirs/vdir1/ls");
     expect(JSON.parse(String(calls[0]?.init.body))).toEqual({ path: "" });
 
@@ -264,6 +272,77 @@ describe("listening and reading", () => {
   });
 });
 
+describe("stat", () => {
+  it("posts one path and returns the metadata", async () => {
+    const { fetch, calls } = fakeFetch(() =>
+      jsonResponse(200, {
+        path: "docs/a.txt",
+        name: "a.txt",
+        kind: "file",
+        size: 12,
+        mtime: "2026-01-01T00:00:00Z",
+        version: "v1-stat",
+      }),
+    );
+    const c = client(fetch);
+    const info = await c.stat("docs/a.txt");
+    expect(calls[0]?.url).toBe(
+      "https://files.example.com/api/sf/vdirs/vdir1/stat",
+    );
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
+      path: "docs/a.txt",
+    });
+    expect(info.kind).toBe("file");
+    expect(info.version).toBe("v1-stat");
+  });
+
+  it("defaults to the vdir root", async () => {
+    const { fetch, calls } = fakeFetch(() =>
+      jsonResponse(200, {
+        path: "",
+        name: "Home",
+        kind: "directory",
+        size: 0,
+        mtime: "2026-01-01T00:00:00Z",
+        version: "v1-root",
+      }),
+    );
+    const c = client(fetch);
+    const info = await c.stat();
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({ path: "" });
+    expect(info.kind).toBe("directory");
+    expect(info.size).toBe(0);
+  });
+
+  it("forwards the caller signal", async () => {
+    const controller = new AbortController();
+    const { fetch, calls } = fakeFetch(() =>
+      jsonResponse(200, {
+        path: "",
+        name: "Home",
+        kind: "directory",
+        size: 0,
+        mtime: "2026-01-01T00:00:00Z",
+        version: "v1-root",
+      }),
+    );
+    const c = client(fetch);
+    await c.stat("", { signal: controller.signal });
+    expect(calls[0]?.init.signal).toBe(controller.signal);
+  });
+
+  it("maps a missing path to notfound", async () => {
+    const { fetch } = fakeFetch(() =>
+      jsonResponse(404, { message: "Not found" }),
+    );
+    const c = client(fetch);
+    await expect(c.stat("missing")).rejects.toMatchObject({
+      kind: "notfound",
+      status: 404,
+    });
+  });
+});
+
 describe("mutations", () => {
   it("creates a nested directory with the expected shape", async () => {
     const { fetch, calls } = fakeFetch(() => emptyResponse(204));
@@ -325,6 +404,7 @@ describe("upload", () => {
     );
     expect(xhr.headers.Authorization).toBe("Bearer sf_v1_secret-token");
     expect(xhr.headers["Content-Type"]).toBe("application/octet-stream");
+    expect(xhr.headers["If-Match"]).toBeUndefined();
     expect(xhr.withCredentials).toBe(false);
 
     xhr.upload.onprogress?.(
@@ -336,6 +416,85 @@ describe("upload", () => {
 
     await expect(result).resolves.toEqual({ path: "docs/a.txt", size: 3 });
     expect(progress).toEqual([[2, 3]]);
+  });
+
+  it("sends a quoted If-Match for ifVersion", async () => {
+    const xhr = new FakeXhr();
+    const c = new StratofoldClient({
+      baseUrl: "https://files.example.com",
+      vdir: "vdir1",
+      createXhr: () => xhr as unknown as XMLHttpRequest,
+    });
+    const pending = c.upload("a.txt", new Blob(["abc"]), {
+      ifVersion: "v1-current",
+    });
+    expect(xhr.headers["If-Match"]).toBe('"v1-current"');
+    xhr.status = 200;
+    xhr.responseText = JSON.stringify({ path: "a.txt", size: 3 });
+    xhr.onload?.();
+    await expect(pending).resolves.toEqual({ path: "a.txt", size: 3 });
+  });
+
+  it("sends * verbatim", async () => {
+    const xhr = new FakeXhr();
+    const c = new StratofoldClient({
+      baseUrl: "https://files.example.com",
+      vdir: "vdir1",
+      createXhr: () => xhr as unknown as XMLHttpRequest,
+    });
+    const pending = c.upload("a.txt", new Blob(["abc"]), { ifVersion: "*" });
+    expect(xhr.headers["If-Match"]).toBe("*");
+    xhr.status = 200;
+    xhr.responseText = JSON.stringify({ path: "a.txt", size: 3 });
+    xhr.onload?.();
+    await pending;
+  });
+
+  it("surfaces a stale version as a conflict with the current version", async () => {
+    const xhr = new FakeXhr();
+    let sends = 0;
+    const c = new StratofoldClient({
+      baseUrl: "https://files.example.com",
+      vdir: "vdir1",
+      createXhr: () => xhr as unknown as XMLHttpRequest,
+    });
+    const send = xhr.send.bind(xhr);
+    xhr.send = (body) => {
+      sends += 1;
+      send(body);
+    };
+    const pending = c.upload("a.txt", new Blob(["abc"]), {
+      ifVersion: "v1-old",
+    });
+    xhr.status = 412;
+    xhr.statusText = "Precondition Failed";
+    xhr.responseText = JSON.stringify({
+      message: "Precondition failed",
+      version: "v1-current",
+    });
+    xhr.onload?.();
+    await expect(pending).rejects.toMatchObject({
+      kind: "conflict",
+      status: 412,
+      version: "v1-current",
+    });
+    expect(sends).toBe(1);
+  });
+
+  it("rejects an invalid ifVersion before creating a request", async () => {
+    let xhrs = 0;
+    const c = new StratofoldClient({
+      baseUrl: "https://files.example.com",
+      vdir: "vdir1",
+      createXhr: () => {
+        xhrs += 1;
+        return new FakeXhr() as unknown as XMLHttpRequest;
+      },
+    });
+    await expect(
+      c.upload("a.txt", new Blob(["abc"]), { ifVersion: '"quoted"' }),
+    ).rejects.toBeInstanceOf(ConfigurationError);
+    expect(xhrs).toBe(0);
   });
 
   it("rejects with UploadCanceled when the caller aborts", async () => {

@@ -14,6 +14,8 @@ export type {
   FetchLike,
   LsEntry,
   ReadOptions,
+  StatEntry,
+  StatOptions,
   StratofoldOptions,
   TemporaryUrl,
   TokenInfo,

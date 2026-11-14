@@ -364,6 +364,20 @@ func TestMintTokensAreSecretAndUnique(t *testing.T) {
 
 // TestLinkResponseSemantics covers GET/HEAD/OPTIONS, representation
 // headers, Range, conditionals, and the 404 failure shape.
+func TestVersionStoreFailureIs500(t *testing.T) {
+	e := setup(t)
+	url := mintURL(t, e, e.privID, "docs/a.txt", e.owner)
+	if _, err := e.s.App.DB().NewQuery("DROP TABLE file_versions").Execute(); err != nil {
+		t.Fatalf("drop version store: %v", err)
+	}
+	resp := e.get(t, url, nil, nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("missing version store: status = %d, want 500 (body %.160q)", resp.StatusCode, b)
+	}
+}
+
 func TestLinkResponseSemantics(t *testing.T) {
 	e := setup(t)
 	url := mintURL(t, e, e.privID, "docs/a.txt", e.owner)

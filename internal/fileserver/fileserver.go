@@ -10,6 +10,7 @@ package fileserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,10 +23,16 @@ import (
 	"github.com/pocketbase/pocketbase/tools/hook"
 	"github.com/pocketbase/pocketbase/tools/router"
 
+	"github.com/mode777/stratofold/internal/fileversion"
 	"github.com/mode777/stratofold/internal/requestauth"
 	"github.com/mode777/stratofold/internal/sftpreadwrite"
 	"github.com/mode777/stratofold/internal/vdir"
 )
+
+// ErrVersionStore distinguishes a version-bookkeeping failure from a
+// sandbox/missing-target resolution failure. Routes must surface it as
+// 500, never disguise it as 404.
+var ErrVersionStore = errors.New("fileserver: version store unavailable")
 
 // Route describes one route registered by RegisterRoutes.
 type Route struct {
@@ -97,8 +104,11 @@ func handle(e *core.RequestEvent) error {
 	// (3) Sandbox resolution — may dial; lexical rejects, escapes and
 	// missing targets all surface as 404 (never a listing of what
 	// exists vs what is forbidden).
-	res, st, err := StatResolved(ctx, e.App, vdirID, virtualPath)
+	res, st, version, err := StatResolved(ctx, e.App, vdirID, virtualPath)
 	if err != nil {
+		if errors.Is(err, ErrVersionStore) {
+			return e.InternalServerError("Internal error", nil)
+		}
 		return e.NotFoundError("Not found", nil)
 	}
 
@@ -112,8 +122,14 @@ func handle(e *core.RequestEvent) error {
 		}
 		// index.html resolution; a directory without one is 404 —
 		// listing stays API-only.
-		res, st, err = StatResolved(ctx, e.App, vdirID, path.Join(virtualPath, "index.html"))
-		if err != nil || st.IsDir() {
+		res, st, version, err = StatResolved(ctx, e.App, vdirID, path.Join(virtualPath, "index.html"))
+		if err != nil {
+			if errors.Is(err, ErrVersionStore) {
+				return e.InternalServerError("Internal error", nil)
+			}
+			return e.NotFoundError("Not found", nil)
+		}
+		if st.IsDir() {
 			return e.NotFoundError("Not found", nil)
 		}
 		// Content-Type follows the file actually served.
@@ -123,34 +139,38 @@ func handle(e *core.RequestEvent) error {
 		return e.NotFoundError("Not found", nil)
 	}
 
-	return ServeFile(e, ctx, res, st, serveName)
+	return ServeFile(e, ctx, res, st, version, serveName)
 }
 
 // StatResolved resolves virtualPath through the sandbox and stats the
 // resolved remote path with one SFTP call. It is exported so the
 // temporary-link route shares the exact resolution behavior.
-func StatResolved(ctx context.Context, app core.App, vdirID, virtualPath string) (*vdir.Resolution, os.FileInfo, error) {
+func StatResolved(ctx context.Context, app core.App, vdirID, virtualPath string) (*vdir.Resolution, os.FileInfo, string, error) {
 	res, err := vdir.NewResolver(app).Resolve(ctx, vdirID, virtualPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 	cl, release, err := res.Provider.Client(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 	st, err := cl.Stat(res.RemotePath)
 	release()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
-	return res, st, nil
+	version, err := fileversion.Version(app, res.VdirID, res.ConnectionID, res.RemotePath, st)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("%w: %w", ErrVersionStore, err)
+	}
+	return res, st, version, nil
 }
 
 // ServeFile evaluates conditionals, computes headers, and streams the
 // byte window. The temporary-link route calls it for linked files; a
 // HEAD request stops after the headers (no SFTP read).
-func ServeFile(e *core.RequestEvent, ctx context.Context, res *vdir.Resolution, st os.FileInfo, virtualName string) error {
-	etag := entityTag(st)
+func ServeFile(e *core.RequestEvent, ctx context.Context, res *vdir.Resolution, st os.FileInfo, version, virtualName string) error {
+	etag := entityTag(version)
 	h := e.Response.Header()
 	h.Set("Accept-Ranges", "bytes")
 	h.Set("ETag", etag)

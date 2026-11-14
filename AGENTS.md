@@ -85,6 +85,10 @@ the specs and files that own each fact.
   follow the `file-server` spec. Streaming responses resume in-place
   across SSH drops; a mid-response failure aborts the connection
   (`http.ErrAbortHandler`) so a truncated body can never look complete.
+  The `ETag` is the quoted strong content version shared with `ls`,
+  `stat`, and conditional upload (ADR 0015), not `size + mtime`; a
+  same-size/same-second save rotates it. `If-None-Match`,
+  `If-Modified-Since`, Range, and `HEAD` semantics are unchanged.
   Verification: `go test ./internal/fileserver/` (Range/conditional/
   auth matrix + reconnect + the golden runner) — the golden runner
   executes `scripts/fileserver-golden.sh` against an ephemeral
@@ -92,23 +96,36 @@ the specs and files that own each fact.
   with `SF_BASE_URL SF_EMAIL SF_PASSWORD SF_VDIR_ID SF_PUB_VDIR_ID`
   (a public and a private vdir over the seeded dataset).
 - **Filesystem API** (roadmap change 5): `POST
-  /api/sf/vdirs/<vdir-id>/{ls,mkdir,mv,rm,upload}` is the write path —
-  JSON bodies (`{"path": …}`, `{"path", "to"}` for mv; upload takes
-  `?path=` and the raw body). Same authorize-before-dial order as
-  `/files/*` (`ls` needs owner/viewer/editor or, on public vdirs,
-  nothing; `mkdir`/`mv`/`rm`/`upload` need the owner or an `editor`
-  share on that vdir — `is_public` never implies write).
+  /api/sf/vdirs/<vdir-id>/{ls,stat,mkdir,mv,rm,upload}` is the write
+  path — JSON bodies (`{"path": …}`, `{"path", "to"}` for mv; upload
+  takes `?path=` and the raw body). `ls` entries and `stat` carry an
+  opaque content `version`; `stat` returns
+  `{path,name,kind,size,mtime,version}` for one path (empty = root,
+  directories `size: 0`), never a remote path. Same
+  authorize-before-dial order as `/files/*` (`ls`/`stat` need
+  owner/viewer/editor or, on public vdirs, nothing; `mkdir`/`mv`/`rm`/
+  `upload` need the owner or an `editor` share on that vdir —
+  `is_public` never implies write).
   Mutations are idempotent per operation and retried across
   disconnects (never partially applied); uploads stream body → temp
   name → atomic rename (nothing buffered host-side; a truncated or
   canceled body never publishes; `fsapi.MaxAttempts` /
-  `fsapi.UploadTransferOptions` bound the retry budgets). Errors map
+  `fsapi.UploadTransferOptions` bound the retry budgets). A strong
+  `If-Match: "<version>"` (or `*`) is re-checked at publish time under
+  a per-target lock; a stale target returns `412` with the current
+  version, publishes nothing, and removes the temp. No header keeps
+  create-or-replace. `internal/fileversion` owns the version hash and
+  the `file_versions` generation store; uploads bump before the rename,
+  `mv` bumps its target best-effort. External SFTP edits are detected
+  by size/whole-second-mtime changes; the same-size/same-second
+  external edit is the documented residual (ADR 0015). Errors map
   deterministically: sandbox/missing `404`, permission `403`, bad
-  shape `400`, retryable/unreachable `503`, else `500`.
-  Verification: `go test ./internal/fsapi/` (operation/retry/authz
-  matrices, disconnect-resume, concurrency); the R5 memory ceiling and
-  sustained-concurrency gates run with `SF_RUN_GATES=1 go test
-  ./internal/fsapi/ -run Gate`.
+  shape `400`, stale precondition `412`, retryable/unreachable `503`,
+  else `500`. Verification: `go test ./internal/fsapi/
+  ./internal/fileversion/ ./internal/migrations/` (stat/version/
+  conditional matrices, operation/retry/authz, disconnect-resume,
+  concurrency); the R5 memory ceiling and sustained-concurrency gates
+  run with `SF_RUN_GATES=1 go test ./internal/fsapi/ -run Gate`.
 - **Sharing** (roadmap change 6): `vdir_shares` records
   (`vdir`, `user`, `role` ∈ `viewer`|`editor`, unique per pair) are
   managed over the record API by the vdir's owner; grantees see their
@@ -159,19 +176,26 @@ the specs and files that own each fact.
 - **Browser client** (change `add-client-library`): `client/` is
   `@stratofold/client`, a zero-dependency TypeScript package (ESM + IIFE
   `Stratofold` global + types, no runtime deps) over the existing bearer
-  API for one vdir: `list`, `read` (range pass-through), `upload`
-  (progress/abort via XHR), `mkdir`, `move`, `remove`, `temporaryUrl`,
-  `fileUrl`, and `tokenInfo` (`/api/sf/tokens/me`). The server base URL
-  is explicit, the token is header-only (never in a URL), failures are
-  the deterministic `StratofoldError` kinds (401/403/404/400/503/5xx,
-  network → retryable 0), and public mode is simply "no token". The
+  API for one vdir: `list`, `stat` (single-path metadata including
+  `version`), `read` (range pass-through), `upload`
+  (progress/abort via XHR; `ifVersion` sends a quoted strong
+  `If-Match`), `mkdir`, `move`, `remove`, `temporaryUrl`, `fileUrl`,
+  and `tokenInfo` (`/api/sf/tokens/me`). `LsEntry` carries `version`.
+  The server base URL is explicit, the token is header-only (never in a
+  URL), failures are the deterministic `StratofoldError` kinds
+  (401/403/404/412-conflict/400/503/5xx, network → retryable 0), and
+  public mode is simply "no token". The
   server hosts no copy and has no `/embed` route (ADR 0013);
-  distribution is npm. `client/test-client/` is a private, static Vite
+  distribution is npm, published by
+  `.github/workflows/release-client.yaml` on `v*` tags with npm trusted
+  publishing (the tag must equal `client/package.json`'s version;
+  ADR 0014). `client/test-client/` is a private, static Vite
   app deployed to GitHub Pages by `.github/workflows/client-pages.yaml`
   that exercises every operation at runtime (no checked-in instance or
   token; production builds refuse `VITE_SF_*` values). Verification:
   `npm --prefix client run test` (unit + dist/IIFE smoke),
   `npm --prefix client run typecheck:readme`,
+  `(cd client && node scripts/check-pack.mjs)`,
   `npm --prefix client/test-client run test`, and the cross-origin
   Playwright suite `client/test-client/e2e/` on the build/verification
   server. `go test ./internal/appserver/` pins the cross-origin

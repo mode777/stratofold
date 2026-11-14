@@ -9,6 +9,8 @@ import type {
   FetchLike,
   LsEntry,
   ReadOptions,
+  StatEntry,
+  StatOptions,
   StratofoldOptions,
   TemporaryUrl,
   TokenInfo,
@@ -79,6 +81,17 @@ export class StratofoldClient {
     return data.entries ?? [];
   }
 
+  /** Describes one path without listing its parent; "" is the root. */
+  async stat(path = "", options: StatOptions = {}): Promise<StatEntry> {
+    const resp = await this.requestJson(apiUrl(this.baseUrl, this.vdir, "stat"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+      signal: options.signal,
+    });
+    return (await resp.json()) as StatEntry;
+  }
+
   /**
    * Fetches a file and resolves to the raw response. Extra headers
    * (range, conditional) are forwarded; the caller owns the body.
@@ -133,6 +146,18 @@ export class StratofoldClient {
     if (options.signal?.aborted) {
       return Promise.reject(new UploadCanceled());
     }
+    if (options.ifVersion !== undefined) {
+      if (
+        options.ifVersion !== "*" &&
+        (options.ifVersion.trim() === "" ||
+          options.ifVersion.includes('"') ||
+          options.ifVersion.startsWith("W/"))
+      ) {
+        return Promise.reject(
+          new ConfigurationError("ifVersion must be an unquoted strong version or *"),
+        );
+      }
+    }
 
     return new Promise<UploadResult>((resolve, reject) => {
       const xhr = this.createXhr();
@@ -141,6 +166,12 @@ export class StratofoldClient {
       xhr.withCredentials = false;
       if (this.token) xhr.setRequestHeader("Authorization", `Bearer ${this.token}`);
       xhr.setRequestHeader("Content-Type", "application/octet-stream");
+      if (options.ifVersion !== undefined) {
+        xhr.setRequestHeader(
+          "If-Match",
+          options.ifVersion === "*" ? "*" : `"${options.ifVersion}"`,
+        );
+      }
 
       const onAbort = () => xhr.abort();
       options.signal?.addEventListener("abort", onAbort, { once: true });
@@ -170,7 +201,19 @@ export class StratofoldClient {
           resolve(result);
           return;
         }
-        reject(failureFor(xhr.status, xhr.statusText || `Upload failed (${xhr.status})`));
+        let message = xhr.statusText || `Upload failed (${xhr.status})`;
+        let version: string | undefined;
+        try {
+          const data = JSON.parse(xhr.responseText) as {
+            message?: string;
+            version?: string;
+          };
+          if (data.message) message = data.message;
+          if (typeof data.version === "string") version = data.version;
+        } catch {
+          // use the status text
+        }
+        reject(failureFor(xhr.status, message, version));
       };
       xhr.onerror = () => {
         cleanup();
@@ -285,11 +328,13 @@ function bodySize(body: UploadBody): number {
 
 async function errorFromResponse(resp: Response): Promise<StratofoldError> {
   let message = resp.statusText || `Request failed (${resp.status})`;
+  let version: string | undefined;
   try {
-    const data = (await resp.json()) as { message?: string };
+    const data = (await resp.json()) as { message?: string; version?: string };
     if (data.message) message = data.message;
+    if (typeof data.version === "string") version = data.version;
   } catch {
     // use the status text
   }
-  return failureFor(resp.status, message);
+  return failureFor(resp.status, message, version);
 }
