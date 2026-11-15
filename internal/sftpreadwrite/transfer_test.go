@@ -176,6 +176,55 @@ func TestFullFileIntegrity(t *testing.T) {
 	}
 }
 
+// TestZeroLengthWriteCompletes: an empty byte stream is a completed
+// write, whether the size is declared as zero or discovered by an
+// immediate EOF, and it truncates an existing target (spec:
+// sftp-streaming, zero-length writes).
+func TestZeroLengthWriteCompletes(t *testing.T) {
+	f := testssh.Start(t, testssh.Options{})
+	defer f.Close()
+
+	m, err := f.NewManager()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	ctx := context.Background()
+	readBack := func(rel string) {
+		t.Helper()
+		var out bytes.Buffer
+		if n, err := sftpreadwrite.New(m, f.Path(rel), sftpreadwrite.Options{}).ReadAll(ctx, &out); err != nil || n != 0 {
+			t.Fatalf("read back %s: n=%d err=%v", rel, n, err)
+		}
+		if out.Len() != 0 {
+			t.Fatalf("%s content = %q, want empty", rel, out.Bytes())
+		}
+	}
+
+	// Declared size zero: one completed attempt, no retry budget burn.
+	tr := sftpreadwrite.New(m, f.Path("empty-declared.bin"), sftpreadwrite.Options{})
+	if n, err := tr.WriteAll(ctx, bytes.NewReader(nil), 0); err != nil || n != 0 {
+		t.Fatalf("declared zero write: n=%d err=%v", n, err)
+	}
+	readBack("empty-declared.bin")
+
+	// EOF-delimited empty reader: no declared size.
+	tr2 := sftpreadwrite.New(m, f.Path("empty-streamed.bin"), sftpreadwrite.Options{})
+	if n, err := tr2.WriteAll(ctx, bytes.NewReader(nil), -1); err != nil || n != 0 {
+		t.Fatalf("EOF-delimited zero write: n=%d err=%v", n, err)
+	}
+	readBack("empty-streamed.bin")
+
+	// Empty write over existing content truncates the target.
+	writeDirect(t, f, "truncate.bin", []byte("existing content"))
+	tr3 := sftpreadwrite.New(m, f.Path("truncate.bin"), sftpreadwrite.Options{})
+	if n, err := tr3.WriteAll(ctx, bytes.NewReader(nil), 0); err != nil || n != 0 {
+		t.Fatalf("truncating zero write: n=%d err=%v", n, err)
+	}
+	readBack("truncate.bin")
+}
+
 // TestPermanentErrorsNotRetried: permission denied and missing files
 // fail immediately — exactly one dial, no retries.
 func TestPermanentErrorsNotRetried(t *testing.T) {

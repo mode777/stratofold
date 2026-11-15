@@ -69,6 +69,8 @@ export function AppsPage() {
   const [minted, setMinted] = useState<MintedToken | null>(null);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
+  const [copiedConnection, setCopiedConnection] = useState(false);
+  const [copyConnectionError, setCopyConnectionError] = useState(false);
   const [revoking, setRevoking] = useState<VdirToken | null>(null);
   const [actionFailure, setActionFailure] = useState<ApiFailure | null>(null);
   const [retry, setRetry] = useState<Retry | null>(null);
@@ -118,6 +120,8 @@ export function AppsPage() {
       setMinted(created);
       setCopied(false);
       setCopyError(false);
+      setCopiedConnection(false);
+      setCopyConnectionError(false);
       setName("");
       setAttempt((n) => n + 1);
     } catch (err) {
@@ -188,6 +192,18 @@ export function AppsPage() {
     }
   };
 
+  const copyConnectionString = async () => {
+    if (!minted?.connection_string) return;
+    try {
+      await navigator.clipboard.writeText(minted.connection_string);
+      setCopiedConnection(true);
+      setCopyConnectionError(false);
+    } catch {
+      setCopiedConnection(false);
+      setCopyConnectionError(true);
+    }
+  };
+
   return (
     <div data-testid="apps-page" className="flex min-h-dvh flex-col pb-24 md:pb-0">
       <div className="border-b border-ios-separator bg-ios-card px-4 pt-1 pb-1">
@@ -232,6 +248,50 @@ export function AppsPage() {
               >
                 {copied ? "Copied" : "Copy token"}
               </button>
+              {copyError && (
+                <span role="alert" data-testid="token-copy-error" className="text-xs text-ios-red">
+                  Copy failed — select the token manually.
+                </span>
+              )}
+            </div>
+            {minted.connection_string && (
+              <div
+                data-testid="connection-string-block"
+                className="space-y-2 border-t border-ios-blue/10 pt-3"
+              >
+                <p className="text-sm font-bold text-ios-label">Connection string</p>
+                <p className="text-xs text-ios-secondary/80">
+                  It contains the server URL, vdir, and token. Copy it now — it won&apos;t be shown
+                  again.
+                </p>
+                <code
+                  data-testid="minted-connection-string"
+                  className="block overflow-x-auto rounded-xl bg-ios-card px-3 py-2 font-mono text-xs text-ios-label"
+                >
+                  {minted.connection_string}
+                </code>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    data-testid="copy-connection-string"
+                    onClick={() => void copyConnectionString()}
+                    className="rounded-xl bg-ios-blue px-3 py-2 text-xs font-semibold text-white shadow-sm"
+                  >
+                    {copiedConnection ? "Copied" : "Copy connection string"}
+                  </button>
+                  {copyConnectionError && (
+                    <span
+                      role="alert"
+                      data-testid="connection-copy-error"
+                      className="text-xs text-ios-red"
+                    >
+                      Copy failed — select the connection string manually.
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 data-testid="dismiss-token"
@@ -239,16 +299,13 @@ export function AppsPage() {
                   setMinted(null);
                   setCopied(false);
                   setCopyError(false);
+                  setCopiedConnection(false);
+                  setCopyConnectionError(false);
                 }}
                 className="rounded-xl bg-ios-card px-3 py-2 text-xs font-semibold text-ios-label shadow-sm"
               >
                 Done
               </button>
-              {copyError && (
-                <span role="alert" data-testid="token-copy-error" className="text-xs text-ios-red">
-                  Copy failed — select the token manually.
-                </span>
-              )}
             </div>
           </section>
         )}

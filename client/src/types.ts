@@ -87,3 +87,13 @@ export type StratofoldOptions = {
   /** Test seam; defaults to `new XMLHttpRequest()`. */
   createXhr?: () => XMLHttpRequest;
 };
+
+/** Optional seams when building a client from a connection string. */
+export type ConnectionStringOverrides = {
+  /** Replace the embedded origin, for example after a proxy/host change. */
+  baseUrl?: string;
+  /** Test seam; defaults to the global fetch. */
+  fetch?: FetchLike;
+  /** Test seam; defaults to `new XMLHttpRequest()`. */
+  createXhr?: () => XMLHttpRequest;
+};

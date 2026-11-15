@@ -37,13 +37,81 @@ you have on that vdir is the ceiling for the token.
      option appears only when your own access allows writes.
 3. Set **Expiry** to Never, 7, 30, 90, or 365 days, then select
    **Create token**.
-4. Copy the token from the **Token created** panel. It is shown once
-   and cannot be recovered; if you lose it, revoke it and mint another.
+4. Copy the **connection string** from the **Token created** panel — it
+   bundles the server URL, the vdir id, and the token — or copy the
+   plaintext token if your app assembles its own configuration. Both are
+   shown once and cannot be recovered; if you lose one, revoke the token
+   and mint another.
 
 The same screen is described from the account holder's side in
 [Connecting an app](../docs/using-stratofold.md#connecting-an-app-access-tokens).
 
-### 2. Construct and verify the client
+### 2. Connect with the connection string
+
+The **Token created** panel shows an `sfconn_v1_…` connection string
+next to the token. It is an opaque value, not a URL, carrying the server
+origin, the vdir id, and the token. Paste it into your app and let the
+client parse it:
+
+```ts
+import { StratofoldClient } from "@stratofold/client";
+
+const connectionString = "sfconn_v1_…";
+
+const client = StratofoldClient.fromConnectionString(connectionString);
+
+const scope = await client.tokenInfo();
+console.log(scope.vdir.name, scope.role, scope.expiresAt);
+```
+
+Parsing is local: no request is made, and neither the connection string
+nor its token is ever placed in a URL, query, or fragment. The string is
+a bearer secret just like the token; keep it out of logs, source
+control, and public bundles.
+
+If the instance moved, or a reverse proxy embedded an origin your app
+cannot reach, override only the base URL — the vdir and token still come
+from the string:
+
+```ts
+import { StratofoldClient } from "@stratofold/client";
+
+const connectionString = "sfconn_v1_…";
+
+const client = StratofoldClient.fromConnectionString(connectionString, {
+  baseUrl: "https://files.example.com",
+});
+```
+
+A malformed, truncated, or unknown-version value throws
+`ConfigurationError` before any request:
+
+```ts
+import {
+  ConfigurationError,
+  StratofoldClient,
+  parseConnectionString,
+} from "@stratofold/client";
+
+const connectionString = "sfconn_v1_…";
+
+try {
+  const { vdir } = parseConnectionString(connectionString);
+  const client = StratofoldClient.fromConnectionString(connectionString);
+  console.log(vdir, client.baseUrl);
+} catch (error) {
+  if (error instanceof ConfigurationError) {
+    console.error("invalid connection string", error.message);
+  } else {
+    throw error;
+  }
+}
+```
+
+### 3. Construct and verify the client manually
+
+If your app receives the base URL, vdir id, and token separately, use
+the options constructor:
 
 ```ts
 import { StratofoldClient } from "@stratofold/client";
@@ -66,7 +134,7 @@ plaintext token. Running it once at startup turns a wrong, expired, or
 revoked credential into an explicit `unauthorized` error before the app
 does any work.
 
-### 3. Make the first request
+### 4. Make the first request
 
 ```ts
 import { StratofoldClient } from "@stratofold/client";
@@ -91,7 +159,7 @@ client can do; the server enforces it on every request:
 For a public vdir and a read-only app, omit `token` entirely; see
 [Public mode](#public-mode).
 
-### 4. Token lifetime and revocation
+### 5. Token lifetime and revocation
 
 Access is re-resolved on every request. The effective permission is the
 lower of the token's role and your current access to the vdir, so the
@@ -104,7 +172,7 @@ Revoke a token from the same **Settings → Connected apps** list; it
 stops working immediately. **Last used** helps you find credentials
 that nothing is using anymore.
 
-### 5. Keep the token private
+### 6. Keep the token private
 
 A token shipped in a public bundle, a static page, or an app store
 build is public. Mint a token per consumer, scope it to the vdir it
@@ -131,6 +199,11 @@ console.log(entries);
 
 `baseUrl` must be an absolute `http`/`https` URL; there is no inferred
 or default server. `vdir` is required. Omit `token` for public mode.
+
+With a connection string, `StratofoldClient.fromConnectionString(value)`
+reads the base URL, vdir, and token in one step; see
+[Connect an app](#connect-an-app). The options constructor remains the
+path for public mode and for callers that already hold the three facts.
 
 If you only know the server and the token, discover the scope first:
 
@@ -364,9 +437,9 @@ try {
 
 A static, frontend-only test client is deployed to GitHub Pages at
 <https://mode777.github.io/stratofold/>. It has no default server and no
-bundled token: enter the base URL and token at runtime (or leave the
-token empty for a public vdir). It exercises every operation and shows
-each result or error class.
+bundled token: enter the base URL and token at runtime, paste a
+connection string, or leave the token empty for a public vdir. It
+exercises every operation and shows each result or error class.
 
 The same app runs locally against any instance:
 

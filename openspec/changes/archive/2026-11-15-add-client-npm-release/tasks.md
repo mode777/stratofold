@@ -83,7 +83,7 @@
       workflow has its own trigger/concurrency and does not reference the
       image workflow, and `release-image.yaml` is unchanged. Verify by
       diffing the workflows and inspecting their `on` blocks.
-- [ ] 3.4 After merge, perform the operator bootstrap: publish a
+- [x] 3.4 After merge, perform the operator bootstrap: publish a
       bootstrap version manually (the current version is acceptable, or
       the next planned version), add the npm trusted publisher for
       `mode777/stratofold` with `release-client.yaml` and the direct

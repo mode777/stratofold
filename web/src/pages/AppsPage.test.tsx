@@ -51,6 +51,7 @@ function tokenStore(
     mintMessage?: string;
     deleteStatus?: number;
     deleteMessage?: string;
+    connectionString?: string | null;
   } = {},
 ) {
   let tokens = [...initial];
@@ -78,8 +79,16 @@ function tokenStore(
         last_used_at: null,
         created: "2026-11-09T00:00:00Z",
         token: "sf_v1_secret",
-      } as VdirToken & { token: string };
-      tokens = [created, ...tokens];
+        connection_string:
+          options.connectionString === undefined
+            ? "sfconn_v1_test-connection-string"
+            : options.connectionString,
+      } as VdirToken & { token: string; connection_string?: string | null };
+      if (created.connection_string === null) delete created.connection_string;
+      const metadata = { ...created } as Partial<typeof created>;
+      delete metadata.token;
+      delete metadata.connection_string;
+      tokens = [metadata as VdirToken, ...tokens];
       return jsonResponse(201, created);
     }
     if (url.startsWith("/api/sf/tokens/") && method === "DELETE") {
@@ -180,6 +189,10 @@ describe("connected apps", () => {
     const panel = await screen.findByTestId("minted-token-panel");
     expect(panel).toHaveTextContent("won't be shown again");
     expect(screen.getByTestId("minted-token")).toHaveTextContent("sf_v1_secret");
+    expect(screen.getByTestId("minted-connection-string")).toHaveTextContent(
+      "sfconn_v1_test-connection-string",
+    );
+    expect(panel).toHaveTextContent("Connection string");
     const post = store.calls.find((call) => call.method === "POST");
     expect(post?.body).toMatchObject({ vdir: "v1", name: "Photo sync", role: "viewer" });
     expect(post?.body?.expires_at).toBeUndefined();
@@ -188,9 +201,31 @@ describe("connected apps", () => {
     await expect(navigator.clipboard.readText()).resolves.toBe("sf_v1_secret");
     expect(screen.getByTestId("copy-token")).toHaveTextContent("Copied");
 
+    await user.click(screen.getByTestId("copy-connection-string"));
+    await expect(navigator.clipboard.readText()).resolves.toBe(
+      "sfconn_v1_test-connection-string",
+    );
+    expect(screen.getByTestId("copy-connection-string")).toHaveTextContent("Copied");
+
     await user.click(screen.getByTestId("dismiss-token"));
     expect(screen.queryByTestId("minted-token-panel")).not.toBeInTheDocument();
     expect(screen.queryByText("sf_v1_secret")).not.toBeInTheDocument();
+    expect(screen.queryByText(/sfconn_v1_/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("token-row")).not.toHaveTextContent("sfconn_v1_");
+  });
+
+  it("shows the token without a connection string when the response omits it", async () => {
+    const store = tokenStore([], { connectionString: null });
+    installPbMock(pbMocks());
+    installFetchMock([store.route]);
+    const user = await loadApps();
+
+    await user.type(await screen.findByTestId("token-name"), "Photo sync");
+    await user.click(screen.getByTestId("token-mint"));
+
+    await screen.findByTestId("minted-token-panel");
+    expect(screen.getByTestId("minted-token")).toHaveTextContent("sf_v1_secret");
+    expect(screen.queryByTestId("connection-string-block")).not.toBeInTheDocument();
   });
 
   it("sends the expiry when a preset is chosen and caps a shared viewer to viewer", async () => {
@@ -224,6 +259,29 @@ describe("connected apps", () => {
 
     expect(await screen.findByTestId("token-copy-error")).toHaveTextContent("select the token manually");
     expect(screen.getByTestId("copy-token")).toHaveTextContent("Copy token");
+  });
+
+  it("reports a connection-string copy failure without claiming success", async () => {
+    const store = tokenStore([]);
+    installPbMock(pbMocks());
+    installFetchMock([store.route]);
+    const user = await loadApps();
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValueOnce(new Error("denied"));
+
+    await user.type(await screen.findByTestId("token-name"), "Photo sync");
+    await user.click(screen.getByTestId("token-mint"));
+    await screen.findByTestId("minted-token-panel");
+    await user.click(screen.getByTestId("copy-connection-string"));
+
+    expect(await screen.findByTestId("connection-copy-error")).toHaveTextContent(
+      "select the connection string manually",
+    );
+    expect(screen.getByTestId("copy-connection-string")).toHaveTextContent(
+      "Copy connection string",
+    );
+    expect(screen.getByTestId("minted-connection-string")).toHaveTextContent(
+      "sfconn_v1_test-connection-string",
+    );
   });
 
   it("does not submit an empty name", async () => {

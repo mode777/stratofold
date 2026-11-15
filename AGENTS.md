@@ -168,7 +168,12 @@ the specs and files that own each fact.
   `min(token role, vdirauthz.Resolve(user, vdir))` — public read access
   alone does not keep a token alive. Management is never bearer-capable.
   Private native media uses token-minted `/s` links; tokens never appear
-  in URLs. Settings → Connected apps lists/mints/revokes. ADR 0012.
+  in URLs. Settings → Connected apps lists/mints/revokes. The mint
+  response also carries a one-time `sfconn_v1_` connection string that
+  bundles the request origin, vdir id, and plaintext token as opaque
+  base64url JSON; it is never stored or listed, and its origin comes
+  from TLS/`X-Forwarded-Proto` plus `X-Forwarded-Host`/`Host`. ADR 0012,
+  ADR 0016.
   Verification: `go test ./internal/vdirtokens/ ./internal/requestauth/
   ./internal/fsapi/ ./internal/fileserver/ ./internal/filelinks/
   ./internal/migrations/ ./internal/appserver/` and
@@ -181,6 +186,9 @@ the specs and files that own each fact.
   (progress/abort via XHR; `ifVersion` sends a quoted strong
   `If-Match`), `mkdir`, `move`, `remove`, `temporaryUrl`, `fileUrl`,
   and `tokenInfo` (`/api/sf/tokens/me`). `LsEntry` carries `version`.
+  `parseConnectionString` and `StratofoldClient.fromConnectionString`
+  read the one-time `sfconn_v1_` app connection string locally (with an
+  optional base-URL override); the value is never sent in a request.
   The server base URL is explicit, the token is header-only (never in a
   URL), failures are the deterministic `StratofoldError` kinds
   (401/403/404/412-conflict/400/503/5xx, network → retryable 0), and
@@ -192,7 +200,8 @@ the specs and files that own each fact.
   ADR 0014). `client/test-client/` is a private, static Vite
   app deployed to GitHub Pages by `.github/workflows/client-pages.yaml`
   that exercises every operation at runtime (no checked-in instance or
-  token; production builds refuse `VITE_SF_*` values). Verification:
+  token; production builds refuse `VITE_SF_*` values) and accepts a
+  pasted connection string. Verification:
   `npm --prefix client run test` (unit + dist/IIFE smoke),
   `npm --prefix client run typecheck:readme`,
   `(cd client && node scripts/check-pack.mjs)`,

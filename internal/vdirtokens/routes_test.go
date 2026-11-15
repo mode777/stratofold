@@ -132,6 +132,11 @@ func cookieFor(t *testing.T, s *testapp.Server, userID string) *http.Cookie {
 
 func routeDo(t *testing.T, s *testapp.Server, method, path string, body any, cookie *http.Cookie, bearer string) (int, map[string]any) {
 	t.Helper()
+	return routeDoWithHeaders(t, s, method, path, body, cookie, bearer, nil)
+}
+
+func routeDoWithHeaders(t *testing.T, s *testapp.Server, method, path string, body any, cookie *http.Cookie, bearer string, headers map[string]string) (int, map[string]any) {
+	t.Helper()
 	var rdr io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -152,6 +157,9 @@ func routeDo(t *testing.T, s *testapp.Server, method, path string, body any, coo
 	}
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	for name, value := range headers {
+		req.Header.Set(name, value)
 	}
 	resp := s.Do(t, req)
 	defer resp.Body.Close()
@@ -227,6 +235,76 @@ func TestTokenMintMatrix(t *testing.T) {
 	}
 	if got := e.f.TotalConns(); got != beforeDials {
 		t.Fatalf("token mint dialed SSH: conns %d -> %d", beforeDials, got)
+	}
+}
+
+func TestTokenMintConnectionString(t *testing.T) {
+	e := routeSetup(t)
+
+	st, out := mintToken(t, e.s, e.owner, e.privID, "connection", "viewer", "")
+	if st != http.StatusCreated {
+		t.Fatalf("mint: status %d body %v", st, out)
+	}
+	token, _ := out["token"].(string)
+	value, _ := out["connection_string"].(string)
+	if !strings.HasPrefix(value, vdirtokens.ConnectionPrefix) {
+		t.Fatalf("connection string = %q, want prefix %q", value, vdirtokens.ConnectionPrefix)
+	}
+	payload := decodeConnectionString(t, value)
+	if payload.URL != e.s.BaseURL {
+		t.Fatalf("connection url = %q, want %q", payload.URL, e.s.BaseURL)
+	}
+	if payload.Vdir != e.privID || payload.Token != token {
+		t.Fatalf("connection facts wrong: %+v", payload)
+	}
+
+	// The list and introspection routes never carry the connection string.
+	_, list := routeDo(t, e.s, http.MethodGet, "/api/sf/tokens", nil, e.owner, "")
+	listRaw, _ := json.Marshal(list)
+	if bytes.Contains(listRaw, []byte("connection_string")) || bytes.Contains(listRaw, []byte(value)) {
+		t.Fatalf("list exposed a connection string: %s", listRaw)
+	}
+	_, me := routeDo(t, e.s, http.MethodGet, "/api/sf/tokens/me", nil, nil, token)
+	meRaw, _ := json.Marshal(me)
+	if bytes.Contains(meRaw, []byte("connection_string")) || bytes.Contains(meRaw, []byte(value)) {
+		t.Fatalf("introspection exposed a connection string: %s", meRaw)
+	}
+
+	// A rejected mint returns no connection string.
+	st, rejected := mintToken(t, e.s, e.viewer, e.privID, "rejected", "editor", "")
+	if st != http.StatusForbidden {
+		t.Fatalf("rejected mint: status %d body %v", st, rejected)
+	}
+	if _, ok := rejected["connection_string"]; ok {
+		t.Fatalf("rejected mint returned a connection string: %v", rejected)
+	}
+}
+
+func TestTokenMintConnectionStringForwardedOrigin(t *testing.T) {
+	e := routeSetup(t)
+	body := map[string]any{"vdir": e.privID, "name": "proxied", "role": "viewer"}
+	st, out := routeDoWithHeaders(t, e.s, http.MethodPost, "/api/sf/tokens", body, e.owner, "", map[string]string{
+		"X-Forwarded-Proto": "https",
+		"X-Forwarded-Host":  "drive.example.com, internal:8090",
+	})
+	if st != http.StatusCreated {
+		t.Fatalf("proxied mint: status %d body %v", st, out)
+	}
+	value, _ := out["connection_string"].(string)
+	payload := decodeConnectionString(t, value)
+	if payload.URL != "https://drive.example.com" {
+		t.Fatalf("proxied connection url = %q, want https://drive.example.com", payload.URL)
+	}
+
+	// Forwarded chains use only their first element.
+	_, out = routeDoWithHeaders(t, e.s, http.MethodPost, "/api/sf/tokens", body, e.owner, "", map[string]string{
+		"X-Forwarded-Proto": "http, https",
+		"X-Forwarded-Host":  "other.example.com, drive.example.com",
+	})
+	value, _ = out["connection_string"].(string)
+	payload = decodeConnectionString(t, value)
+	if payload.URL != "http://other.example.com" {
+		t.Fatalf("chained forwarded url = %q, want http://other.example.com", payload.URL)
 	}
 }
 

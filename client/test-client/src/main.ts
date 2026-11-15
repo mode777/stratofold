@@ -6,6 +6,7 @@ import {
   saveConnection,
   type Connection,
 } from "./config.js";
+import { applyConnectionString } from "./connection.js";
 import {
   formatError,
   performOperation,
@@ -22,6 +23,12 @@ const element = <T extends HTMLElement>(id: string): T => {
 const baseUrlInput = element<HTMLInputElement>("baseUrl");
 const vdirInput = element<HTMLInputElement>("vdir");
 const tokenInput = element<HTMLInputElement>("token");
+const connectionStringInput = element<HTMLInputElement>("connectionString");
+const applyConnectionStringButton = element<HTMLButtonElement>(
+  "applyConnectionString",
+);
+const connectionStringError =
+  element<HTMLParagraphElement>("connectionStringError");
 const pathInput = element<HTMLInputElement>("path");
 const rangeInput = element<HTMLInputElement>("range");
 const moveFromInput = element<HTMLInputElement>("moveFrom");
@@ -141,6 +148,31 @@ async function execute(operation: Operation, hooks: Hooks = {}): Promise<void> {
 element<HTMLButtonElement>("save").addEventListener("click", () => {
   syncConnection();
   logLine(`connection saved for ${connection.baseUrl || "(no base URL)"}`);
+});
+
+applyConnectionStringButton.addEventListener("click", () => {
+  try {
+    const next = applyConnectionString(connectionStringInput.value, connection);
+    baseUrlInput.value = next.baseUrl;
+    vdirInput.value = next.vdir;
+    tokenInput.value = next.token;
+    syncConnection();
+    connectionStringInput.value = "";
+    connectionStringError.hidden = true;
+    connectionStringError.textContent = "";
+    logLine(
+      `connection string applied for ${next.baseUrl} (vdir ${next.vdir})`,
+    );
+  } catch (error) {
+    connectionStringError.hidden = false;
+    connectionStringError.textContent =
+      `Could not apply connection string — ${formatError(error)}`;
+  }
+});
+
+connectionStringInput.addEventListener("input", () => {
+  connectionStringError.hidden = true;
+  connectionStringError.textContent = "";
 });
 
 baseUrlInput.addEventListener("change", () => syncConnection());

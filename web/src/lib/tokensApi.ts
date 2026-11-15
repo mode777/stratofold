@@ -19,7 +19,11 @@ export type VdirToken = {
   created: string;
 };
 
-export type MintedToken = VdirToken & { token: string };
+export type MintedToken = VdirToken & {
+  token: string;
+  /** One-time app connection string; absent when the origin is unknown. */
+  connection_string?: string;
+};
 
 export type MintTokenInput = {
   vdir: string;

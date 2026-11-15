@@ -648,6 +648,21 @@ func (t *Transfer) pipelineWrite(ctx context.Context, f *sftp.File, start int64,
 		}
 	}
 
+	// The in-loop completion check only runs when a result arrives. An
+	// empty input (declared size zero, or EOF before any chunk) dispatches
+	// nothing, so settle once more from the final feeder state. results is
+	// closed only after the feeder and every worker have finished, so this
+	// snapshot is stable.
+	if firstErr == nil && !done {
+		mu.Lock()
+		fin, disp, rerr := finished, dispatched, readerErr
+		mu.Unlock()
+		if fin && acked >= disp {
+			done = true
+			firstErr = rerr
+		}
+	}
+
 	// Every pulled-but-unacked byte becomes the replay for the next
 	// attempt, in offset order: dispatched-but-unacked results first,
 	// then the carried (pulled-but-unsent) chunk.

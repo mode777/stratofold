@@ -183,6 +183,13 @@ expiry.
 
 - The token is shown **once**, on the screen that creates it. Copy it
   then; the app needs it in an `Authorization: Bearer …` header.
+- The same panel also shows a **connection string** (`sfconn_v1_…`)
+  that bundles the server address, this vdir, and the token. Apps using
+  `@stratofold/client` can pass it to
+  `StratofoldClient.fromConnectionString(...)`; if the instance address
+  changes, supply a `baseUrl` override. It is a one-time secret like the
+  token — copy it before dismissing the panel; it is never stored or
+  shown again, and it is not a URL.
 - A token is bound to that one user and vdir. It cannot be used on
   another vdir, and its role is capped by your current access: a viewer
   token stays read-only even for an owner, and an editor token stops

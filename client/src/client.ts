@@ -5,7 +5,9 @@ import {
   failureFor,
   networkFailure,
 } from "./errors.js";
+import { parseConnectionString } from "./connectionString.js";
 import type {
+  ConnectionStringOverrides,
   FetchLike,
   LsEntry,
   ReadOptions,
@@ -68,6 +70,31 @@ export class StratofoldClient {
         }
         return new XMLHttpRequest();
       });
+  }
+
+  /**
+   * Builds a client from an `sfconn_v1_` connection string minted with
+   * an app token. Parsing is local and makes no request. `baseUrl` can
+   * override a stale embedded origin; the vdir and token always come
+   * from the string.
+   */
+  static fromConnectionString(
+    value: string,
+    overrides: ConnectionStringOverrides = {},
+  ): StratofoldClient {
+    if (overrides === null || typeof overrides !== "object") {
+      throw new ConfigurationError(
+        "connection string overrides must be an object",
+      );
+    }
+    const parts = parseConnectionString(value);
+    return new StratofoldClient({
+      baseUrl: overrides.baseUrl ?? parts.baseUrl,
+      vdir: parts.vdir,
+      token: parts.token,
+      fetch: overrides.fetch,
+      createXhr: overrides.createXhr,
+    });
   }
 
   /** Lists one directory; the empty path lists the vdir root. */

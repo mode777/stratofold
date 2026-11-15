@@ -23,8 +23,9 @@ multi-gigabyte transfers are ordinary.
   request; revocation is immediate.
 - **App tokens** — mint a revocable, single-directory bearer token for a
   script or frontend app, with a viewer or editor role and an optional
-  expiry. A token never exceeds the owner's current access and can be
-  revoked from Settings.
+  expiry, and copy a one-paste connection string for
+  `@stratofold/client`. A token never exceeds the owner's current access
+  and can be revoked from Settings.
 - **Stream, don't cache** — downloads, media playback, and uploads all
   stream to and from the SSH source; uploads publish atomically and
   survive connection drops, and videos can be cast to a Chromecast

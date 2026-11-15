@@ -650,6 +650,105 @@ func TestUploadByteExactAndReplaces(t *testing.T) {
 	}
 }
 
+func TestUploadZeroByteCreatesAndReplaces(t *testing.T) {
+	e := setup(t)
+	c := ownerC(t, e)
+
+	decode := func(resp *http.Response) (string, int64) {
+		t.Helper()
+		var out struct {
+			Path string `json:"path"`
+			Size int64  `json:"size"`
+		}
+		if err := json.NewDecoder(bytes.NewReader(body(t, resp))).Decode(&out); err != nil {
+			t.Fatalf("decode upload body: %v", err)
+		}
+		return out.Path, out.Size
+	}
+	noTemps := func() {
+		t.Helper()
+		for _, n := range remoteNames(t, e, "sandbox/up") {
+			if strings.Contains(n, ".sfpart-") {
+				t.Fatalf("temp partial left behind: %s", n)
+			}
+		}
+	}
+	assertEmpty := func(rel string) {
+		t.Helper()
+		fi, err := remoteLstat(t, e, rel)
+		if err != nil || fi.IsDir() || fi.Size() != 0 {
+			t.Fatalf("%s after empty upload: fi=%v err=%v", rel, fi, err)
+		}
+		if got := remoteRead(t, e, rel); len(got) != 0 {
+			t.Fatalf("%s content = %q, want empty", rel, got)
+		}
+	}
+
+	// Explicit Content-Length: 0 creates an empty file.
+	resp := uploadBytes(t, e, e.privID, "up/empty.bin", nil, c)
+	mustStatus(t, resp, http.StatusOK)
+	if path, size := decode(resp); path != "up/empty.bin" || size != 0 {
+		t.Fatalf("empty upload response = %q size %d, want up/empty.bin size 0", path, size)
+	}
+	assertEmpty("sandbox/up/empty.bin")
+	noTemps()
+
+	// Chunked empty body (unknown length) publishes the same result.
+	resp = uploadEmptyChunked(t, e, e.privID, "up/empty-chunked.bin", c)
+	mustStatus(t, resp, http.StatusOK)
+	if path, size := decode(resp); path != "up/empty-chunked.bin" || size != 0 {
+		t.Fatalf("chunked empty upload response = %q size %d, want up/empty-chunked.bin size 0", path, size)
+	}
+	assertEmpty("sandbox/up/empty-chunked.bin")
+	noTemps()
+
+	// Empty upload over existing content replaces it and rotates the version.
+	mustStatus(t, uploadBytes(t, e, e.privID, "up/replace.bin", []byte("content to replace"), c), http.StatusOK)
+	before := statFile(t, e, e.privID, "up/replace.bin", c)
+	if before.Size != int64(len("content to replace")) {
+		t.Fatalf("seed size = %d", before.Size)
+	}
+	mustStatus(t, uploadBytes(t, e, e.privID, "up/replace.bin", nil, c), http.StatusOK)
+	after := statFile(t, e, e.privID, "up/replace.bin", c)
+	if after.Size != 0 {
+		t.Fatalf("replaced size = %d, want 0", after.Size)
+	}
+	if after.Version == before.Version {
+		t.Fatalf("empty replacement kept version %q", before.Version)
+	}
+	assertEmpty("sandbox/up/replace.bin")
+
+	// A matching If-Match empty upload publishes and rotates again.
+	resp = uploadBytesWithIfMatch(t, e, e.privID, "up/replace.bin", nil, c, `"`+after.Version+`"`)
+	mustStatus(t, resp, http.StatusOK)
+	final := statFile(t, e, e.privID, "up/replace.bin", c)
+	if final.Size != 0 || final.Version == after.Version {
+		t.Fatalf("conditional empty upload: size=%d version=%q (before %q)", final.Size, final.Version, after.Version)
+	}
+	noTemps()
+}
+
+// uploadEmptyChunked sends an empty body with no declared length, so the
+// request is chunked (ContentLength -1) and reaches the server as EOF
+// with zero bytes.
+func uploadEmptyChunked(t *testing.T, e *env, vdirID, vpath string, cookie *http.Cookie) *http.Response {
+	t.Helper()
+	u := fmt.Sprintf("%s/api/sf/vdirs/%s/upload?%s", e.s.BaseURL, vdirID, url.Values{"path": {vpath}}.Encode())
+	req, err := http.NewRequest(http.MethodPost, u, bytes.NewReader(nil))
+	if err != nil {
+		t.Fatalf("chunked upload request: %v", err)
+	}
+	req.ContentLength = -1
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("chunked upload %s: %v", vpath, err)
+	}
+	return resp
+}
+
 func TestUploadMissingParentAndBadShape(t *testing.T) {
 	e := setup(t)
 	c := ownerC(t, e)

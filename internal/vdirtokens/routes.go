@@ -104,7 +104,7 @@ func handleMint(e *core.RequestEvent) error {
 	if err != nil {
 		return e.InternalServerError("Could not create token", nil)
 	}
-	return e.JSON(http.StatusCreated, map[string]any{
+	response := map[string]any{
 		"id":           tok.ID,
 		"name":         tok.Name,
 		"token":        plain,
@@ -115,7 +115,16 @@ func handleMint(e *core.RequestEvent) error {
 		"expires_at":   isoOrNil(tok.ExpiresAt),
 		"last_used_at": isoOrNil(tok.LastUsedAt),
 		"created":      tok.Created.UTC().Format(time.RFC3339),
-	})
+	}
+	if origin, ok := OriginFromRequest(e.Request); ok {
+		connectionString, err := EncodeConnectionString(origin, tok.VdirID, plain)
+		if err != nil {
+			e.App.Logger().Warn("vdir_tokens: could not build connection string", "error", err)
+		} else {
+			response["connection_string"] = connectionString
+		}
+	}
+	return e.JSON(http.StatusCreated, response)
 }
 
 // handleList returns the requester's own token metadata only.

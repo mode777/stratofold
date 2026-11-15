@@ -65,9 +65,11 @@ Covers what PocketBase cannot: operations against remote hosts.
 - `POST /api/sf/tokens` / `GET /api/sf/tokens` / `DELETE
   /api/sf/tokens/{id}` — session-only management of vdir-scoped access
   tokens (mint, list metadata, revoke). `GET /api/sf/tokens/me` is the
-  bearer-only scope-discovery route. The plaintext token appears only
-  in the mint response; the collection has no record-API rules
-  ([ADR 0012](decisions/0012-vdir-access-tokens.md)).
+  bearer-only scope-discovery route. The plaintext token and the
+  one-time connection string appear only in the mint response; the
+  collection has no record-API rules
+  ([ADR 0012](decisions/0012-vdir-access-tokens.md),
+  [ADR 0016](decisions/0016-app-connection-strings.md)).
 - `GET /api/sf/users/lookup?email=…` — authenticated, exact-match
   resolution of an email to `{id, email}` for naming share grantees;
   at most one record, no listing/search form (any other query shape is
@@ -162,8 +164,13 @@ or revoke tokens. Bearer authorization re-resolves `vdirauthz` on every
 request and requires an editor token plus an editor grant for writes, so
 a share removal, role change, deletion, or expiry ends access on the
 next request. Tokens are not accepted in URLs; private native media uses
-a token-minted `/s` link. See
-[ADR 0012](decisions/0012-vdir-access-tokens.md).
+a token-minted `/s` link. Each mint also returns a one-time
+`sfconn_v1_` connection string carrying the request origin, the vdir
+id, and the plaintext token; it is not stored, and
+`@stratofold/client` parses it locally through
+`fromConnectionString`/`parseConnectionString`. See
+[ADR 0012](decisions/0012-vdir-access-tokens.md) and
+[ADR 0016](decisions/0016-app-connection-strings.md).
 
 ### Temporary file links — `/s/*`
 

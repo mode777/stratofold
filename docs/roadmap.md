@@ -312,6 +312,25 @@ cannot silently replace newer content. Adds `POST
   the CORS preflight, and the client `stat`/`ifVersion`/`conflict`
   suites.
 
+### `add-app-connection-strings` — one-paste app setup
+
+The client needs the origin, vdir id, and token, but the mint response
+only carried the token and app authors assembled the rest by hand. Adds
+a one-time `sfconn_v1_…` connection string to `POST /api/sf/tokens`,
+plus `StratofoldClient.fromConnectionString`/`parseConnectionString`;
+the Connected apps panel and the static test client accept it. The
+opaque value is deliberately not a URL, so the token still never enters
+a URL.
+
+- **Specs**: `vdir-access-tokens`, `client-library`, `web-ui`.
+- **ADR**: 0016 — app connection strings are opaque prefixed values.
+- **Out of scope**: URL/deep-link or QR forms, server-side storage,
+  re-display after the mint panel, token rotation, and any change to
+  token roles, expiry, or auth resolution.
+- **Validation**: Go mint/origin matrices in `internal/vdirtokens/`,
+  the client parser/factory suites, Connected apps component tests, and
+  the cross-origin test-client E2E.
+
 ## Conditional follow-ons
 
 Not scheduled. Start only when a concrete integration needs them; neither
@@ -329,7 +348,7 @@ own account (Option C from the exploration).
   credential is a change-10 token bound to that user and vdir.
 - **Specs**: `app-connect-flow` (new); deltas to `vdir-access-tokens`,
   `web-ui`.
-- **ADRs**: 0016 — connect flow and consent.
+- **ADRs**: 0017 — connect flow and consent.
 - **Out of scope**: registered OAuth clients and refresh tokens (change
   13), iframe bridge, and third-party cookie reliance.
 - **Validation**: device-code matrix (expiry, single use, approval,
@@ -346,7 +365,7 @@ that need standard refresh/rotation semantics.
   rotating refresh tokens with reuse detection, and standard revocation.
 - **Specs**: `oauth-pkce` (new); deltas to `vdir-access-tokens`,
   `web-ui`, `deployment`.
-- **ADRs**: 0017 — OAuth 2.1 public-client profile.
+- **ADRs**: 0018 — OAuth 2.1 public-client profile.
 - **Out of scope**: confidential clients, dynamic client registration,
   and acting as a general identity provider.
 - **Validation**: PKCE/redirect-URI/state matrices, refresh rotation and
@@ -364,6 +383,9 @@ that need standard refresh/rotation semantics.
   server route (there is no `/embed`; the package ships via npm).
 - `add-file-stat-and-conditional-upload` is an additive post-11 API
   change; it does not depend on the conditional follow-ons.
+- `add-app-connection-strings` is an additive post-11 setup change; it
+  builds on token minting and the client package, and does not depend on
+  the conditional follow-ons.
 - 12 and 13 are gated follow-ons: do not start them until the trigger
   in each entry is real. Option B (10 + 11) is the chosen first step and
   does not depend on them.

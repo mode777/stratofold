@@ -95,7 +95,14 @@ docker run --rm -it -v stratofold-data:/pb_data \
 - **API access tokens.** **Settings → Connected apps** mints
   vdir-scoped bearer tokens for scripts and third-party apps. The
   plaintext is shown once and stored only as a SHA-256 hash; revoking it
-  takes effect on the next request. Treat a token as a password for its
+  takes effect on the next request. The same one-time response also
+  carries an `sfconn_v1_…` connection string with the origin, vdir, and
+  token; it is a secret with the same handling, never stored or logged.
+  Its embedded origin follows the request: HTTPS from TLS or
+  `X-Forwarded-Proto`, and the host from `X-Forwarded-Host` when present,
+  otherwise `Host`. Forward those headers through the reverse proxy so
+  copied strings point at the public address; a client can override the
+  base URL if they do not. Treat a token as a password for its
   one vdir: serve the instance over HTTPS, and never log the
   `Authorization` header at the proxy. PocketBase's global CORS policy
   is permissive (`Access-Control-Allow-Origin: *`, no credentials), so

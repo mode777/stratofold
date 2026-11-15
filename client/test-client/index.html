@@ -91,6 +91,14 @@
 
     <section id="connection">
       <h2>Connection</h2>
+      <label for="connectionString">Connection string (optional — fills the fields below)</label>
+      <div class="row">
+        <div>
+          <input id="connectionString" type="password" placeholder="paste sfconn_v1_…" autocomplete="off" />
+        </div>
+      </div>
+      <button id="applyConnectionString">Apply connection string</button>
+      <p class="hint" id="connectionStringError" role="alert" hidden></p>
       <div class="row">
         <div>
           <label for="baseUrl">Server base URL</label>

@@ -43,18 +43,31 @@ test("the client works from a foreign origin against a real vdir", async ({
     data: { vdir: privateVdir!.id, name: "client-e2e", role: "editor" },
   });
   expect(mint.ok()).toBeTruthy();
-  const token = ((await mint.json()) as { token: string }).token;
+  const minted = (await mint.json()) as {
+    token: string;
+    connection_string: string;
+  };
+  const token = minted.token;
+  const connectionString = minted.connection_string;
   expect(token).toMatch(/^sf_v1_/);
+  expect(connectionString).toMatch(/^sfconn_v1_/);
 
   const urls: string[] = [];
   page.on("request", (req) => urls.push(req.url()));
 
   await page.goto("/");
 
+  // A pasted connection string fills the server, vdir, and token in one
+  // step; the package parses it locally and the field is cleared.
+  await page.fill("#connectionString", connectionString);
+  await page.click("#applyConnectionString");
+  await expect(page.locator("#baseUrl")).toHaveValue(
+    API.replace(/\/+$/, ""),
+  );
+  await expect(page.locator("#vdir")).toHaveValue(privateVdir!.id);
+  await expect(page.locator("#connectionString")).toHaveValue("");
+
   // Scope discovery sets the vdir from the token alone.
-  await page.fill("#baseUrl", API);
-  await page.fill("#token", token);
-  await page.click("#save");
   await page.click("#discover");
   await expect(page.locator("#vdir")).toHaveValue(privateVdir!.id);
   await expect(page.locator("#log")).toContainText(`vdir ${privateVdir!.name}`);
@@ -137,7 +150,9 @@ test("the client works from a foreign origin against a real vdir", async ({
   await page.click("#read");
   await expect(page.locator("#log")).toContainText("read hello.txt: HTTP 200");
 
-  // The bearer token never appears in any request URL.
+  // Neither the connection string nor the bearer token appears in any
+  // request URL.
+  expect(urls.some((url) => url.includes(connectionString))).toBe(false);
   expect(urls.some((url) => url.includes(token))).toBe(false);
 
   await admin.dispose();

@@ -8,6 +8,7 @@ import {
   StratofoldClient,
   StratofoldError,
   UploadCanceled,
+  parseConnectionString,
 } from "../dist/index.js";
 
 const iifePath = fileURLToPath(new URL("../dist/stratofold.min.js", import.meta.url));
@@ -15,6 +16,8 @@ const iifePath = fileURLToPath(new URL("../dist/stratofold.min.js", import.meta.
 describe("published artifacts", () => {
   it("ESM build exposes the public API", () => {
     expect(typeof StratofoldClient).toBe("function");
+    expect(typeof StratofoldClient.fromConnectionString).toBe("function");
+    expect(typeof parseConnectionString).toBe("function");
     expect(typeof StratofoldError).toBe("function");
     expect(typeof UploadCanceled).toBe("function");
     expect(typeof ConfigurationError).toBe("function");
@@ -26,6 +29,7 @@ describe("published artifacts", () => {
     const global = context.Stratofold as Record<string, unknown> | undefined;
     expect(global).toBeDefined();
     expect(typeof global?.StratofoldClient).toBe("function");
+    expect(typeof global?.parseConnectionString).toBe("function");
     expect(typeof global?.StratofoldError).toBe("function");
     expect(typeof global?.UploadCanceled).toBe("function");
   });

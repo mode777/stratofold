@@ -25,6 +25,7 @@ directory holds only what stays true after a change is archived.
 | 0013 | Accepted | Client distribution: npm package, no instance-hosted embed |
 | 0014 | Accepted | Client package publishes to npm from CI on `v*` tags |
 | 0015 | Accepted | Content versions from publication generations plus remote signatures |
+| 0016 | Accepted | App connection strings are opaque prefixed values |
 
 ## Adding a decision
 
