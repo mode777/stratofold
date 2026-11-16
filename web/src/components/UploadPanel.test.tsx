@@ -1,8 +1,9 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ApiFailure } from "../lib/filesApi";
 import { UploadQueue, type UploadFn } from "../lib/uploadQueue";
+import { ExtractTracker, type ExtractApi } from "../lib/extractJobs";
 import { UploadPanel } from "./UploadPanel";
 
 type Call = {
@@ -82,5 +83,41 @@ describe("UploadPanel", () => {
 
     await userEvent.setup().click(screen.getByTestId("upload-retry"));
     expect(calls).toHaveLength(2);
+  });
+
+  it("lists archive extractions with progress and cancel", async () => {
+    const { fn } = fakeUpload();
+    const queue = new UploadQueue(fn);
+    const cancel = vi.fn<ExtractApi["cancel"]>();
+    const api: ExtractApi = {
+      start: vi.fn(async () => ({
+        id: "j1",
+        state: "running" as const,
+        phase: "extracting" as const,
+        path: "docs/photos.zip",
+        target: "docs/photos",
+        skipped: 2,
+        entriesTotal: 4,
+        entriesDone: 1,
+        bytesTotal: 100,
+        bytesDone: 25,
+        startedAt: "2026-11-15T10:00:00Z",
+      })),
+      get: vi.fn(),
+      cancel,
+    };
+    const tracker = new ExtractTracker(api, 1e9);
+    await act(async () => {
+      await tracker.start("v1", "docs/photos.zip");
+    });
+
+    render(<UploadPanel queue={queue} tracker={tracker} />);
+    expect(screen.getByTestId("extract-item")).toBeInTheDocument();
+    expect(screen.getByTestId("extract-name")).toHaveTextContent("photos");
+    expect(screen.getByTestId("extract-state")).toHaveTextContent("Extracting · 25%");
+    expect(screen.getByTestId("extract-progress")).toHaveAttribute("value", "25");
+
+    await userEvent.setup().click(screen.getByTestId("extract-cancel"));
+    expect(cancel).toHaveBeenCalledWith("v1", "j1");
   });
 });

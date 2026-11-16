@@ -80,6 +80,20 @@ shared with you under "Shared with me"; public vdirs carry a marker
   **Rename**, **Move**, and **Delete** in the context menu (delete asks
   for confirmation first). Viewers see none of these — the UI only
   offers what your role on that vdir allows.
+- Owners and editors can **Extract** a `.zip` (context menu): it unpacks
+  into a folder named after the archive, right beside it — `docs/photos.zip`
+  becomes `docs/photos/`. The archive is read from the SSH host and each
+  file is written back as it unpacks, so nothing is downloaded to your
+  device and nothing is stored on the Stratofold host. A progress row
+  appears on **Uploads** and the new folder shows up as soon as the
+  unpack finishes; cancel any time before then. If a folder with that
+  name already exists the app says so and suggests another name instead
+  of merging. Apple metadata (`__MACOSX/`, `._*`, `.DS_Store`,
+  `Thumbs.db`) is skipped, and an archive that would write outside its
+  own folder, contains links, is password-protected, or expands past the
+  size limit is refused as a whole — nothing partial is ever published.
+  See the
+  [archive-extraction spec](../openspec/specs/archive-extraction/spec.md).
 
 ## Previews
 

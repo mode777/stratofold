@@ -126,6 +126,32 @@ the specs and files that own each fact.
   conditional matrices, operation/retry/authz, disconnect-resume,
   concurrency); the R5 memory ceiling and sustained-concurrency gates
   run with `SF_RUN_GATES=1 go test ./internal/fsapi/ -run Gate`.
+- **Archive extraction** (change `add-archive-extraction`): `POST
+  /api/sf/vdirs/<vdir-id>/extract` streams a remote `.zip` into an
+  equally named folder beside it (`docs/photos.zip` → `docs/photos/`)
+  without downloading it; `{"path": …}` plus an optional single-segment
+  `"name"` override. The work is an in-memory job (ADR 0017):
+  `202 {job}` immediately, `GET …/extract/{jobId}` for progress/result,
+  `DELETE …/extract/{jobId}` to cancel (idempotent). `internal/archiveextract`
+  reads the archive through an `io.ReaderAt` over
+  `sftpreadwrite.ReadRange` (1 MiB read-ahead window) and writes each
+  member through `sftpreadwrite.WriteAll`, so nothing is buffered
+  host-side and a drop resumes mid-member. Members land in a hidden
+  `.<archive>.sfext-<hex>` directory published by one
+  rename (`PosixRename`, `Rename` fallback) — a partial folder is never
+  browsable and failures/cancels leave nothing. Entry names use a
+  **strict** validator, not `vdirpath.Resolve` (which normalizes
+  `a/../b`): traversal segments, absolute paths, backslashes, NUL,
+  invalid UTF-8, symlink entries, and encrypted entries fail the whole
+  archive; `__MACOSX/`, `._*`, `.DS_Store`, `Thumbs.db` are skipped and
+  counted. Ceilings (100k entries, depth 64, 50 GiB *inflated*) are
+  enforced on a running counter, and write access is re-checked between
+  member batches so a revoked share stops the job. `ls` hides only
+  Stratofold's own scratch names (`.sfpart-`/`.sfext-` + 16 hex), never
+  real dotfiles. Verification: `go test ./internal/archiveextract/
+  ./internal/fsapi/` (strict-entry matrix, ceiling/bomb, fixture runs,
+  authz/observation/cancel) plus the `SF_RUN_GATES=1` and
+  `SF_TESTSSH_MODE=external` runs recorded in the change's tasks.
 - **Sharing** (roadmap change 6): `vdir_shares` records
   (`vdir`, `user`, `role` ∈ `viewer`|`editor`, unique per pair) are
   managed over the record API by the vdir's owner; grantees see their
@@ -342,6 +368,21 @@ the specs and files that own each fact.
   via `web/e2e/file-management.spec.ts` (small+large upload,
   navigate-away R7 acceptance, mutation flows, viewer gating,
   permanent-failure no-retry-storm).
+- **Archive extraction in the SPA** (change `add-archive-extraction`):
+  `.zip` entries classify as their own `archive` kind
+  (`web/src/lib/entryKind.ts`) and writers get **Extract** in the
+  context menu; `web/src/components/FileOpsDialogs.tsx`'s `ExtractSheet`
+  confirms the derived folder name, lets the user change it, and turns a
+  `409` into an alternative-name retry (`nextFreeName`). Job state lives
+  in the framework-free `web/src/lib/extractJobs.ts` tracker (mirrors the
+  upload queue: polls every 750 ms, survives navigation, cancelable),
+  bound through `useExtractJobs`. Progress and cancel render on the
+  Uploads destination beside uploads and in the floating indicator;
+  `BrowsePage` subscribes to `onSettled` and reloads the listing when a
+  successful job's target parent is the directory being browsed.
+  Verification: `npm --prefix web run test` (tracker, sheet, context
+  menu, panel, browse-refresh tests) and `web/e2e/archive-extraction.spec.ts`
+  on the verification server.
 
 - **Packaging & release** (roadmap change 9): the SPA is embedded in the
   server binary (`internal/webassets`, `//go:embed all:dist`) and served

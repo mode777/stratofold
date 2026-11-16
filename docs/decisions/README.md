@@ -26,6 +26,7 @@ directory holds only what stays true after a change is archived.
 | 0014 | Accepted | Client package publishes to npm from CI on `v*` tags |
 | 0015 | Accepted | Content versions from publication generations plus remote signatures |
 | 0016 | Accepted | App connection strings are opaque prefixed values |
+| 0017 | Accepted | Long-running operations are in-memory jobs polled over the API |
 
 ## Adding a decision
 

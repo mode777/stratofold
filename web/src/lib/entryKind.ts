@@ -5,11 +5,14 @@
 // the in-app player, images the in-app viewer, and video keeps the
 // new-tab native player.
 
-export type EntryKind = "dir" | "audio" | "image" | "video" | "other";
+export type EntryKind = "dir" | "audio" | "image" | "video" | "archive" | "other";
 
 const AUDIO = /\.(mp3|wav|m4a|ogg|weba|flac|aac)$/i;
 const IMAGE = /\.(jpg|jpeg|png|gif|webp|heic|bmp|svg|dng)$/i;
 const VIDEO = /\.(mp4|webm|ogv|mov|m4v)$/i;
+// Archive entries are the ones the server can extract (zip only today);
+// the server remains the authority on what it accepts.
+const ARCHIVE = /\.zip$/i;
 
 // entryKind classifies one listing entry. Directories pass dir=true;
 // the extension sets apply to file names only.
@@ -18,6 +21,7 @@ export function entryKind(name: string, dir = false): EntryKind {
   if (AUDIO.test(name)) return "audio";
   if (IMAGE.test(name)) return "image";
   if (VIDEO.test(name)) return "video";
+  if (ARCHIVE.test(name)) return "archive";
   return "other";
 }
 

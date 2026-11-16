@@ -1,10 +1,30 @@
 // Upload queue view (upload-queue spec, design D8): the queue's items,
 // progress, lifecycle state, and pause/cancel/retry controls, rendered
-// on the Uploads destination. The queue singleton is unchanged.
+// on the Uploads destination. The queue singleton is unchanged. Archive
+// extractions (archive-extraction spec) are listed on the same
+// destination as their own section — they have a lifecycle and a cancel,
+// but none of the queue's ordering/pause/one-per-target semantics.
 
 import { uploadQueue, type UploadItem, type UploadQueue } from "../lib/uploadQueue";
 import { useUploadQueue } from "../lib/useUploadQueue";
-import { CircleCheckIcon, CircleXIcon, PauseIcon, PlayIcon, RefreshIcon, WarningIcon, DocIcon } from "./icons";
+import {
+  extractJobs,
+  isActive as isActiveExtract,
+  percentOf,
+  type ExtractJob,
+  type ExtractTracker,
+} from "../lib/extractJobs";
+import { useExtractJobs } from "../lib/useExtractJobs";
+import {
+  ArchiveIcon,
+  CircleCheckIcon,
+  CircleXIcon,
+  PauseIcon,
+  PlayIcon,
+  RefreshIcon,
+  WarningIcon,
+  DocIcon,
+} from "./icons";
 
 function percent(item: UploadItem): number {
   if (item.state === "completed") return 100;
@@ -41,8 +61,88 @@ function ItemIcon({ item }: { item: UploadItem }) {
   );
 }
 
-export function UploadPanel({ queue = uploadQueue }: { queue?: UploadQueue } = {}) {
+function extractStatusText(job: ExtractJob): string {
+  if (job.state === "running") {
+    const pct = percentOf(job);
+    if (job.phase === "scanning") return "Reading archive…";
+    if (job.phase === "publishing") return "Finishing…";
+    return `Extracting · ${pct}%`;
+  }
+  if (job.state === "succeeded") return "Done";
+  if (job.state === "canceled") return "Canceled";
+  return job.error?.message ?? "Failed";
+}
+
+function extractName(job: ExtractJob): string {
+  const parts = job.target.split("/");
+  return parts[parts.length - 1] || job.target;
+}
+
+function ExtractionItem({ job, onCancel }: { job: ExtractJob; onCancel: (id: string) => void }) {
+  const tone = isActiveExtract(job)
+    ? "bg-ios-blue/10 text-ios-blue"
+    : job.state === "succeeded"
+      ? "bg-emerald-50 text-ios-green"
+      : "bg-rose-50 text-ios-red";
+  const Icon = job.state === "failed" ? WarningIcon : job.state === "succeeded" ? CircleCheckIcon : ArchiveIcon;
+  return (
+    <li data-testid="extract-item" className="rounded-2xl border border-black/5 bg-ios-card p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className={`flex h-9 w-9 items-center justify-center rounded-xl text-sm ${tone}`}>
+            <Icon />
+          </span>
+          <div className="min-w-0">
+            <p data-testid="extract-name" className="truncate text-sm font-semibold text-ios-label">
+              {extractName(job)}
+            </p>
+            <p
+              data-testid="extract-state"
+              className={`text-xs font-medium ${
+                job.state === "failed"
+                  ? "text-ios-red"
+                  : job.state === "succeeded"
+                    ? "text-ios-green"
+                    : "text-ios-blue"
+              }`}
+            >
+              {extractStatusText(job)}
+            </p>
+          </div>
+        </div>
+        {isActiveExtract(job) && (
+          <button
+            type="button"
+            data-testid="extract-cancel"
+            aria-label={`Cancel extracting ${extractName(job)}`}
+            onClick={() => onCancel(job.id)}
+            className="shrink-0 rounded-full p-1 text-ios-secondary/50 hover:bg-black/5"
+          >
+            <CircleXIcon className="text-lg" />
+          </button>
+        )}
+      </div>
+      {isActiveExtract(job) && (
+        <progress
+          data-testid="extract-progress"
+          value={percentOf(job)}
+          max={100}
+          className="mt-3 h-1.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-ios-separator [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-ios-blue [&::-moz-progress-bar]:bg-ios-blue"
+        />
+      )}
+    </li>
+  );
+}
+
+export function UploadPanel({
+  queue = uploadQueue,
+  tracker = extractJobs,
+}: {
+  queue?: UploadQueue;
+  tracker?: ExtractTracker;
+} = {}) {
   const { items, paused } = useUploadQueue(queue);
+  const { jobs } = useExtractJobs(tracker);
   const active = items.filter((it) => isActive(it.state)).length;
 
   return (
@@ -61,6 +161,14 @@ export function UploadPanel({ queue = uploadQueue }: { queue?: UploadQueue } = {
           </button>
         )}
       </div>
+
+      {jobs.length > 0 && (
+        <ul data-testid="extract-list" className="space-y-3 px-4 pb-3">
+          {jobs.map((job) => (
+            <ExtractionItem key={job.id} job={job} onCancel={(id) => void tracker.cancel(id)} />
+          ))}
+        </ul>
+      )}
 
       {items.length === 0 ? (
         <div data-testid="upload-empty" className="flex flex-1 flex-col items-center px-6 py-12 text-center">

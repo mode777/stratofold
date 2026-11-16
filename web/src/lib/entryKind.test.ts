@@ -54,9 +54,17 @@ describe("entryKind", () => {
     expect(entryKind("Movie.Mp4")).toBe("video");
   });
 
+  it("classifies archives the server can extract", () => {
+    expect(entryKind("archive.zip")).toBe("archive");
+    expect(entryKind("Backup.ZIP")).toBe("archive");
+    for (const name of ["notes.tar", "photos.tar.gz", "bundle.7z", "thing.rar"]) {
+      expect(entryKind(name)).toBe("other");
+    }
+    expect(entryKind("folder.zip", true)).toBe("dir");
+  });
+
   it("maps unknown or extension-less names to other", () => {
     expect(entryKind("notes.txt")).toBe("other");
-    expect(entryKind("archive.zip")).toBe("other");
     expect(entryKind("README")).toBe("other");
     expect(entryKind("trailingdot.")).toBe("other");
   });

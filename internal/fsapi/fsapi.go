@@ -21,6 +21,7 @@ import (
 	"os"
 	"path"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/pkg/sftp"
@@ -55,6 +56,9 @@ func CustomRoutes() []Route {
 		{http.MethodPost, "/api/sf/vdirs/{vdirId}/mv"},
 		{http.MethodPost, "/api/sf/vdirs/{vdirId}/rm"},
 		{http.MethodPost, "/api/sf/vdirs/{vdirId}/upload"},
+		{http.MethodPost, "/api/sf/vdirs/{vdirId}/extract"},
+		{http.MethodGet, "/api/sf/vdirs/{vdirId}/extract/{jobId}"},
+		{http.MethodDelete, "/api/sf/vdirs/{vdirId}/extract/{jobId}"},
 	}
 }
 
@@ -73,6 +77,45 @@ func RegisterRoutes(g *router.RouterGroup[*core.RequestEvent], middlewares ...*h
 	sub.POST("/{vdirId}/mv", handleMv)
 	sub.POST("/{vdirId}/rm", handleRm)
 	sub.POST("/{vdirId}/upload", handleUpload).Unbind(apis.DefaultBodyLimitMiddlewareId)
+	sub.POST("/{vdirId}/extract", handleExtract)
+	sub.GET("/{vdirId}/extract/{jobId}", handleExtractStatus)
+	sub.DELETE("/{vdirId}/extract/{jobId}", handleExtractCancel)
+}
+
+// scratchMarker* are the suffixes Stratofold appends to its temporary
+// names: .<base>.sfpart-<hex> for upload publication and
+// .<base>.sfext-<hex> for extraction publication.
+var scratchMarkers = []string{".sfpart-", ".sfext-"}
+
+// isScratchName reports a name this system creates for its own in-flight
+// work. It is deliberately narrow: a real dot-prefixed entry such as
+// .bashrc or a .git directory must keep listing, which is why this is not
+// a dotfile filter.
+func isScratchName(name string) bool {
+	if !strings.HasPrefix(name, ".") {
+		return false
+	}
+	for _, marker := range scratchMarkers {
+		i := strings.LastIndex(name, marker)
+		if i <= 0 {
+			continue
+		}
+		suffix := name[i+len(marker):]
+		if len(suffix) != 16 {
+			continue
+		}
+		hexOnly := true
+		for _, r := range suffix {
+			if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+				hexOnly = false
+				break
+			}
+		}
+		if hexOnly {
+			return true
+		}
+	}
+	return false
 }
 
 // pathBody is the JSON request shape of the non-upload operations
@@ -257,6 +300,12 @@ func readDirEntries(cl *sftp.Client, dir string) ([]entry, error) {
 	}
 	out := make([]entry, 0, len(list))
 	for _, en := range list {
+		// Stratofold's own in-flight scratch artifacts are not listing
+		// members: a running upload or extraction must never look like
+		// content, and never like the folder it is about to publish.
+		if isScratchName(en.Name()) {
+			continue
+		}
 		out = append(out, entry{
 			Name:    en.Name(),
 			Size:    en.Size(),

@@ -8,6 +8,7 @@
 package e2eharness
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/base64"
 	"encoding/binary"
@@ -214,6 +215,25 @@ func (s *Stack) seed(_ string) error {
 	return nil
 }
 
+// seededZip builds the small archive the extraction E2E unpacks.
+func seededZip() []byte {
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	for name, content := range map[string]string{
+		"readme.txt":       "packed readme\n",
+		"nested/data.txt":  "nested data\n",
+		"__MACOSX/._ghost": "metadata\n",
+	} {
+		fw, err := w.Create(name)
+		if err != nil {
+			continue
+		}
+		_, _ = fw.Write([]byte(content))
+	}
+	_ = w.Close()
+	return buf.Bytes()
+}
+
 // seedDataset writes the E2E files under root: a text file, a small
 // media file, a docs/ subdirectory, a photos/ directory with several
 // images for the fullscreen gallery E2E, an album/ directory for the
@@ -247,6 +267,11 @@ func seedDataset(root string) error {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(root, "photo.png"), tinyPNG(), 0o644); err != nil {
+		return err
+	}
+	// bundle.zip feeds the archive-extraction E2E flow: extracting it
+	// creates bundle/ beside it without a download.
+	if err := os.WriteFile(filepath.Join(root, "bundle.zip"), seededZip(), 0o644); err != nil {
 		return err
 	}
 	// photos/ feeds the fullscreen-gallery E2E flows: three decodable
@@ -324,13 +349,13 @@ func tinyWAV() []byte {
 	buf.WriteString("RIFF")
 	_ = binary.Write(buf, binary.LittleEndian, uint32(36+len(samples)))
 	buf.WriteString("WAVEfmt ")
-	_ = binary.Write(buf, binary.LittleEndian, uint32(16))          // fmt chunk size
-	_ = binary.Write(buf, binary.LittleEndian, uint16(1))           // PCM
-	_ = binary.Write(buf, binary.LittleEndian, uint16(1))           // mono
-	_ = binary.Write(buf, binary.LittleEndian, uint32(sampleRate))  // sample rate
-	_ = binary.Write(buf, binary.LittleEndian, uint32(sampleRate))  // byte rate
-	_ = binary.Write(buf, binary.LittleEndian, uint16(1))           // block align
-	_ = binary.Write(buf, binary.LittleEndian, uint16(8))           // bits per sample
+	_ = binary.Write(buf, binary.LittleEndian, uint32(16))         // fmt chunk size
+	_ = binary.Write(buf, binary.LittleEndian, uint16(1))          // PCM
+	_ = binary.Write(buf, binary.LittleEndian, uint16(1))          // mono
+	_ = binary.Write(buf, binary.LittleEndian, uint32(sampleRate)) // sample rate
+	_ = binary.Write(buf, binary.LittleEndian, uint32(sampleRate)) // byte rate
+	_ = binary.Write(buf, binary.LittleEndian, uint16(1))          // block align
+	_ = binary.Write(buf, binary.LittleEndian, uint16(8))          // bits per sample
 	buf.WriteString("data")
 	_ = binary.Write(buf, binary.LittleEndian, uint32(len(samples)))
 	buf.Write(samples)

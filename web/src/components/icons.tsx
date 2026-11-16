@@ -298,6 +298,16 @@ export function InstallIcon(props: IconProps) {
   );
 }
 
+export function ArchiveIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M3 7h18v3H3z" />
+      <path d="M5 10v10h14V10" />
+      <path d="M10 14h4" />
+    </Svg>
+  );
+}
+
 export function RefreshIcon(props: IconProps) {
   return (
     <Svg {...props}>

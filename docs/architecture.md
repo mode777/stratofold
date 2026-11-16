@@ -78,7 +78,12 @@ Covers what PocketBase cannot: operations against remote hosts.
 - `POST /api/sf/vdirs/{id}/ls` — directory listing (JSON body
   `{"path": …}`, the vdir root when empty) returning entries with
   name, size, directory flag, modification time, and the opaque content
-  `version`; listing is part of the API per the vision.
+  `version`; listing is part of the API per the vision. Stratofold's own
+  in-flight scratch names (`.‹base›.sfpart-‹hex›` for upload publication
+  and `.‹base›.sfext-‹hex›` for extraction) are not listed — a running
+  operation is never a browsable member and never looks like the folder
+  it is about to publish. Legitimate dot-prefixed entries such as
+  `.bashrc` or `.git` keep listing; this is not a dotfile filter.
 - `POST /api/sf/vdirs/{id}/stat` — single-path metadata
   (`{"path": …}`, empty = root) without listing the parent: `path`,
   `name`, `kind` (`file`/`directory`), `size` (0 for directories),
@@ -106,6 +111,12 @@ Covers what PocketBase cannot: operations against remote hosts.
   time; a stale target returns `412` (with the current version when it
   exists), publishes nothing, and removes the temp. Without the header
   the upload keeps create-or-replace semantics.
+- `POST /api/sf/vdirs/{id}/extract` — starts an archive-extraction job
+  for a `.zip` (`{"path": …, "name"?: …}`) and answers `202` with the
+  job object; the work runs detached from the request.
+  `GET /api/sf/vdirs/{id}/extract/{jobId}` reports progress and the
+  terminal result, `DELETE …/{jobId}` cancels idempotently. See the
+  archive-extraction subsection below.
 - Public equivalents of read-only operations (`ls`) exist for virtual
   directories marked public, without authentication; writes require the
   owner's session or an `editor` share on every vdir (public never
@@ -125,6 +136,39 @@ else `500`. Create-type operations resolve through a sandbox-checked
 partial resolution (deepest existing ancestor + lexical tail), so
 fresh paths are created inside the sandbox without weakening
 containment.
+
+### Archive extraction — `/api/sf/vdirs/{id}/extract`
+
+Extracts a remote `.zip` into an equally named folder beside it
+(`docs/photos.zip` → `docs/photos/`) without downloading it. The
+archive is read in place through the ranged, retried transfer
+(`internal/archiveextract`: an `io.ReaderAt` over `ReadRange` with a
+1 MiB read-ahead window, fed to `archive/zip`), while each member
+streams back out through the same resumable writer uploads use — so a
+dropped connection resumes mid-member and the host never buffers the
+archive.
+
+Work is an **in-memory job** (ADR 0017): `POST` authorizes, resolves
+the source through the sandbox, content-sniffs it, and returns `202`;
+the job reports `scanning` → `extracting` → `publishing` with entry and
+byte counters, and ends `succeeded`, `failed`, or `canceled`. Errors
+knowable at request time are ordinary statuses (`400` not an archive,
+`404` missing/sandbox, `409` target exists); later failures travel on
+the job with a status from the same classes. Jobs do not survive a
+restart.
+
+Members are written into a hidden scratch directory and published with
+one rename (`PosixRename`, falling back to `Rename`), so a partially
+extracted folder is never visible and a failed or canceled job leaves
+nothing. Entry names are validated strictly — no traversal segments
+(never normalized), no absolute paths, no backslashes, no NUL bytes,
+no invalid UTF-8, no symlink entries, no encrypted entries — and a
+structural violation fails the whole archive while cosmetic metadata
+(`__MACOSX/`, `._*`, `.DS_Store`, `Thumbs.db`) is skipped and counted.
+Ceilings bound entries, depth, and *inflated* bytes (100k, 64,
+50 GiB), enforced on a running counter rather than declared sizes, and
+write access is re-checked between member batches so a revoked share
+stops a running job.
 
 ### Streaming file server — `/files/*`
 
@@ -395,3 +439,7 @@ Explicitly out of scope for now (design seams exist, no commitments):
 - Protocols other than SSH/SFTP
 - Server-side remote copy optimization (currently streams through the
   server)
+- Remote command execution of any kind (for example running `unzip` on
+  the host instead of streaming the archive through the server)
+- Archive formats beyond zip, password-protected archives, and dynamic
+  virtual folders over archive contents

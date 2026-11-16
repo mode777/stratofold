@@ -7,13 +7,15 @@
 // downloads it anonymously (no token; un-publishing revokes it). On a
 // non-public vdir, a signed-in reader instead offers Copy 24-hour link,
 // which mints a session-free /s/<token> URL (add-expiring-file-links).
-// Rename/Move/Delete are writer-only.
+// Extract is writer-only and appears only for archive files (the
+// archive-extraction spec). Rename/Move/Delete are writer-only.
 
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { filesUrl, type LsEntry } from "../lib/filesApi";
 import { entryKind } from "../lib/entryKind";
 import {
+  ArchiveIcon,
   ChevronRightIcon,
   DownloadIcon,
   FolderIcon,
@@ -93,6 +95,7 @@ export function ContextMenu({
   onRename,
   onMove,
   onDelete,
+  onExtract,
   onClose,
 }: {
   entry: LsEntry;
@@ -107,6 +110,7 @@ export function ContextMenu({
   onRename: (entry: LsEntry, path: string) => void;
   onMove: (entry: LsEntry, path: string) => void;
   onDelete: (entry: LsEntry, path: string) => void;
+  onExtract?: (entry: LsEntry, path: string) => void;
   onClose: () => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -175,7 +179,9 @@ export function ContextMenu({
                     ? "Image"
                     : kind === "video"
                       ? "Video"
-                      : "File"}
+                      : kind === "archive"
+                        ? "Archive"
+                        : "File"}
             </span>
           </span>
         </div>
@@ -235,6 +241,14 @@ export function ContextMenu({
               testid="action-copy-temp-link"
               Icon={LinkIcon}
               onClick={() => void copyTemporaryLink()}
+            />
+          )}
+          {canWrite && kind === "archive" && onExtract && (
+            <MenuItem
+              label="Extract"
+              testid="action-extract"
+              Icon={ArchiveIcon}
+              onClick={() => onExtract(entry, path)}
             />
           )}
           {canWrite && (

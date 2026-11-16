@@ -872,3 +872,103 @@ describe("anonymous public mode", () => {
     await waitFor(() => expect(screen.getByTestId("state-unavailable")).toBeInTheDocument());
   });
 });
+
+describe("archive extraction", () => {
+  function extractRouter(
+    vdirId: string,
+    onSettle: () => void,
+  ): FetchRoute {
+    return (url, init) => {
+      if (url === `/api/sf/vdirs/${vdirId}/extract` && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { path: string; name?: string };
+        return jsonResponse(202, {
+          job: {
+            id: "job1",
+            state: "running",
+            phase: "scanning",
+            path: body.path,
+            target: "photos",
+            skipped: 0,
+            entriesTotal: 0,
+            entriesDone: 0,
+            bytesTotal: 0,
+            bytesDone: 0,
+            startedAt: "2026-11-15T10:00:00Z",
+          },
+        });
+      }
+      const m = new RegExp(`^/api/sf/vdirs/${vdirId}/extract/(.+)$`).exec(url);
+      if (m) {
+        onSettle();
+        return jsonResponse(200, {
+          job: {
+            id: m[1],
+            state: "succeeded",
+            phase: "publishing",
+            path: "photos.zip",
+            target: "photos",
+            skipped: 0,
+            entriesTotal: 1,
+            entriesDone: 1,
+            bytesTotal: 10,
+            bytesDone: 10,
+            startedAt: "2026-11-15T10:00:00Z",
+            finishedAt: "2026-11-15T10:00:05Z",
+          },
+        });
+      }
+      return undefined;
+    };
+  }
+
+  it("extracts a zip from the context menu and shows the folder without a reload", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    let settled = false;
+    const before = [entry("photos.zip", { size: 100 })];
+    const after = [entry("photos", { dir: true }), ...before];
+    installFetchMock([
+      extractRouter("v1", () => {
+        settled = true;
+      }),
+      (url, init) => {
+        if (url !== "/api/sf/vdirs/v1/ls" || init?.method !== "POST") return undefined;
+        const path = JSON.parse(String(init.body)).path as string;
+        if (path !== "") return jsonResponse(404, { message: "Not found." });
+        return jsonResponse(200, { path, entries: settled ? after : before });
+      },
+    ]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+
+    const user = userEvent.setup();
+    await openMenu("photos.zip");
+    expect(await screen.findByTestId("action-extract")).toBeInTheDocument();
+    await user.click(screen.getByTestId("action-extract"));
+
+    // The confirmation names the derived folder.
+    expect(await screen.findByTestId("extract-name")).toHaveValue("photos");
+    await user.click(screen.getByTestId("extract-submit"));
+
+    // The job settles on the next poll and the listing refreshes itself.
+    expect(await screen.findByText("photos", {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.queryByTestId("extract-name")).not.toBeInTheDocument();
+  });
+
+  it("offers no extraction to a reader without write access", async () => {
+    sessionState.userId = "u2";
+    installPbMock([collectionList("vdirs", [MINE])]);
+    installFetchMock([
+      (url, init) => {
+        if (url.includes("/collections/vdir_shares/records")) return jsonResponse(200, { items: [] });
+        if (url !== "/api/sf/vdirs/v1/ls" || init?.method !== "POST") return undefined;
+        return jsonResponse(200, { path: "", entries: [entry("photos.zip")] });
+      },
+    ]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+
+    await openMenu("photos.zip");
+    expect(await screen.findByTestId("context-menu")).toBeInTheDocument();
+    expect(screen.queryByTestId("action-extract")).not.toBeInTheDocument();
+  });
+});

@@ -21,11 +21,12 @@ import {
 } from "../lib/listing";
 import { listVdirs, toApiFailure, type VdirRecord } from "../lib/records";
 import { uploadQueue } from "../lib/uploadQueue";
+import { extractJobs } from "../lib/extractJobs";
 import { useSession } from "../lib/session";
 import { useVdirRole } from "../lib/useVdirRole";
 import { Breadcrumbs } from "../components/Breadcrumbs";
 import { ContextMenu } from "../components/ContextMenu";
-import { DeleteAlert, MkdirSheet, RenameSheet } from "../components/FileOpsDialogs";
+import { DeleteAlert, ExtractSheet, MkdirSheet, RenameSheet } from "../components/FileOpsDialogs";
 import { EmptyState, FailureState, Spinner, UnavailableState } from "../components/Errors";
 import { usePublicBrowseName } from "../components/PublicGate";
 import { EntryGrid, EntryList } from "../components/EntryViews";
@@ -36,7 +37,7 @@ type ViewMode = "list" | "grid";
 
 type FileOp =
   | { kind: "mkdir" }
-  | { kind: "rename" | "delete"; entry: LsEntry; path: string };
+  | { kind: "rename" | "delete" | "extract"; entry: LsEntry; path: string };
 
 type MenuState = { entry: LsEntry; path: string };
 
@@ -144,6 +145,15 @@ export function BrowsePage() {
     }
     e.target.value = "";
   };
+
+  // An extraction that finishes while its archive's directory is open
+  // refreshes the listing, so the new folder appears without a reload.
+  useEffect(() => {
+    return extractJobs.onSettled((job) => {
+      if (job.state !== "succeeded") return;
+      if (parentPath(job.target) === path) reload();
+    });
+  }, [path]);
 
   const openDir = (next: string) => void navigate(browseUrl(vdirId ?? "", next));
   const openPreview = (_entry: LsEntry, entryPath: string) =>
@@ -343,6 +353,10 @@ export function BrowsePage() {
             setMenu(null);
             setOp({ kind: "delete", entry, path: p });
           }}
+          onExtract={(entry, p) => {
+            setMenu(null);
+            setOp({ kind: "extract", entry, path: p });
+          }}
           onClose={() => setMenu(null)}
         />
       )}
@@ -357,6 +371,15 @@ export function BrowsePage() {
           path={op.path}
           onClose={() => setOp(null)}
           onDone={finishOp}
+        />
+      )}
+      {op?.kind === "extract" && (
+        <ExtractSheet
+          vdirId={vdirId ?? ""}
+          entry={op.entry}
+          path={op.path}
+          onClose={() => setOp(null)}
+          onStarted={() => setOp(null)}
         />
       )}
       {op?.kind === "delete" && (

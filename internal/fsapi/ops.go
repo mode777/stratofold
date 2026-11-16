@@ -17,6 +17,7 @@ import (
 	"github.com/pkg/sftp"
 	"github.com/pocketbase/pocketbase/core"
 
+	"github.com/mode777/stratofold/internal/archiveextract"
 	"github.com/mode777/stratofold/internal/fileversion"
 	"github.com/mode777/stratofold/internal/sshconn"
 	"github.com/mode777/stratofold/internal/ssherr"
@@ -99,6 +100,13 @@ func httpStatus(err error) int {
 	if errors.As(err, &precondition) {
 		return http.StatusPreconditionFailed
 	}
+	// The archive-extraction package owns the mapping for its own error
+	// classes (ceiling/unsupported → 400, conflict → 409, withdrawn
+	// access → 403, capacity/recovery → 503), so the API keeps one
+	// taxonomy across surfaces.
+	if status, ok := archiveextract.Status(err); ok && status != http.StatusOK {
+		return status
+	}
 	switch {
 	case err == nil:
 		return http.StatusOK
@@ -157,6 +165,8 @@ func respondErr(e *core.RequestEvent, err error) error {
 		return e.NotFoundError("Not found", nil)
 	case http.StatusForbidden:
 		return e.ForbiddenError("Forbidden", nil)
+	case http.StatusConflict:
+		return e.Error(http.StatusConflict, "Conflict", nil)
 	case http.StatusServiceUnavailable:
 		return e.Error(http.StatusServiceUnavailable, "Remote host unavailable", nil)
 	default:

@@ -17,6 +17,10 @@ multi-gigabyte transfers are ordinary.
 
 - **Virtual directories** — pick a folder on any SSH host and it becomes
   one clean, browsable root in the app.
+- **Extract archives in place** — unpack a `.zip` into a folder beside
+  it without downloading it first: the archive is read from the SSH host
+  and each file written back as it unpacks, with progress, cancel, and
+  nothing half-extracted ever visible.
 - **Sharing** — grant another user read (`viewer`) or write (`editor`)
   access per directory, make a directory public for anyone with its link,
   or hand out a 24-hour link to one file. Access is re-checked on every
@@ -57,8 +61,8 @@ upgrades, and backups, is in the
 ## Documentation
 
 - [Using Stratofold](docs/using-stratofold.md) — the end-user guide:
-  accounts, connections, virtual directories, uploads, sharing, and the
-  installed app.
+  accounts, connections, virtual directories, uploads, archive
+  extraction, sharing, and the installed app.
 - [Hosting Stratofold](docs/hosting.md) — the hosting guide: running
   the image, first-time setup, HTTPS, upgrading, and backup.
 - [Client library](client/README.md) — the npm browser SDK for

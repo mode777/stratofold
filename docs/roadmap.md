@@ -331,6 +331,28 @@ a URL.
   the client parser/factory suites, Connected apps component tests, and
   the cross-origin test-client E2E.
 
+### `add-archive-extraction` — unpack a remote zip in place
+
+Extracting an archive is the one Drive-like action a file manager is
+expected to have and remote archives made impossible without a round trip
+through the client. Reads the archive in place through ranged SFTP reads
+and streams every member back through the resumable writer, publishing
+one folder by a single rename.
+
+- **Specs**: `archive-extraction` (new); deltas to `filesystem-api`,
+  `web-ui`.
+- **ADR**: 0017 — long-running operations are in-memory jobs polled over
+  the API.
+- **Out of scope**: formats beyond zip, password-protected archives,
+  bulk extraction, durable jobs, browser-side unzip, remote `unzip`
+  execution, and dynamic vdirs over archive contents.
+- **Validation**: the strict-entry matrix and ceiling/bomb tests in
+  `internal/archiveextract/`, the authz/observation/cancel matrix in
+  `internal/fsapi/`, the chaos reconnect test, the `SF_RUN_GATES=1`
+  memory gate (2 GiB unpacked with a flat resident set), the external
+  OpenSSH run, and `web/e2e/archive-extraction.spec.ts` on the
+  verification server.
+
 ## Conditional follow-ons
 
 Not scheduled. Start only when a concrete integration needs them; neither

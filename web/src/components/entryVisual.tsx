@@ -6,7 +6,7 @@
 import type { ReactElement } from "react";
 import type { LsEntry } from "../lib/filesApi";
 import { entryKind, type EntryKind } from "../lib/entryKind";
-import { DocIcon, FilmIcon, FolderIcon, ImageIcon, MusicIcon, type IconProps } from "./icons";
+import { ArchiveIcon, DocIcon, FilmIcon, FolderIcon, ImageIcon, MusicIcon, type IconProps } from "./icons";
 
 export type EntryVisual = {
   Icon: (p: IconProps) => ReactElement;
@@ -17,6 +17,7 @@ const TONES: Record<Exclude<EntryKind, "dir">, EntryVisual> = {
   audio: { Icon: MusicIcon, tone: "bg-pink-50 text-pink-600" },
   image: { Icon: ImageIcon, tone: "bg-emerald-50 text-ios-green" },
   video: { Icon: FilmIcon, tone: "bg-violet-50 text-violet-600" },
+  archive: { Icon: ArchiveIcon, tone: "bg-amber-50 text-amber-700" },
   // PDFs keep their own accent within the generic document kind.
   other: { Icon: DocIcon, tone: "bg-ios-secondary/10 text-ios-secondary" },
 };

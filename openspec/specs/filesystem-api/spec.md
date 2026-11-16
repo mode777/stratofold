@@ -18,7 +18,11 @@ when empty) that returns the entries of the remote directory at the
 sandbox-resolved location — each entry carrying its name, size,
 directory flag, modification time, and content version; sandbox
 rejections and missing targets SHALL yield `404` with no content from
-outside the root ever reachable.
+outside the root ever reachable. Entries that are Stratofold's own
+in-flight scratch artifacts — the temporary file and directory names it
+creates for upload publication and archive extraction — SHALL NOT be
+listed, while legitimate dot-prefixed remote entries SHALL still be
+listed.
 
 #### Scenario: Listing maps the real remote subfolder
 
@@ -39,6 +43,16 @@ outside the root ever reachable.
 
 - **WHEN** the vdir id does not exist or the virtual path does not resolve to a remote directory
 - **THEN** the response is `404`
+
+#### Scenario: In-flight scratch entries are not listed
+
+- **WHEN** a directory is listed while an upload or an extraction is writing its temporary name there
+- **THEN** the temporary file or directory is absent from the listing, and it never appears under the name of the operation's final target
+
+#### Scenario: Legitimate dot-prefixed entries still list
+
+- **WHEN** the remote directory genuinely contains dot-prefixed entries such as `.bashrc` or a `.git` directory
+- **THEN** those entries are listed normally, because only Stratofold's own scratch names are filtered
 
 ### Requirement: Single-path metadata is available without listing the parent
 
@@ -346,8 +360,9 @@ The system SHALL decide access before any remote operation. A request
 MAY authenticate with the `sf_session` cookie or with a vdir-scoped
 bearer token (`Authorization: Bearer …`). `ls` requires read access: the
 vdir's owner, a `viewer` or `editor` share holder, or — on the
-cookie/anonymous path — a public vdir. `mkdir`, `mv`, `rm`, and `upload`
-require the owner or an `editor` share on every vdir. A bearer token
+cookie/anonymous path — a public vdir. `mkdir`, `mv`, `rm`, `upload`, and
+archive extraction — starting, observing, or canceling a job — require
+the owner or an `editor` share on every vdir. A bearer token
 SHALL be accepted only on its own vdir and only while its user holds a
 grant at least as strong as the operation requires: a `viewer` token may
 read but never write, and an `editor` token may write only where the user
@@ -356,21 +371,23 @@ is still an owner or editor. Invalid, expired, or revoked tokens are
 grant is `403`; an anonymous request to a non-public vdir is `401`;
 `is_public` never implies write. A bearer credential SHALL be
 authoritative when present, even if a valid cookie is also sent, and
-rejected requests never dial.
+rejected requests never dial. A running extraction SHALL re-check write
+access between member batches and SHALL stop without publishing when the
+grant has been withdrawn.
 
 #### Scenario: Owner operates on own vdir
 
-- **WHEN** the owner calls `ls`, `mkdir`, `mv`, `rm`, or `upload` on a non-public vdir with a valid session
+- **WHEN** the owner calls `ls`, `mkdir`, `mv`, `rm`, `upload`, or `extract` on a non-public vdir with a valid session
 - **THEN** each operation executes
 
 #### Scenario: Viewer lists but cannot write
 
-- **WHEN** a holder of a `viewer` share calls `ls` on the vdir with a valid session, then calls `mkdir`, `mv`, `rm`, or `upload`
+- **WHEN** a holder of a `viewer` share calls `ls` on the vdir with a valid session, then calls `mkdir`, `mv`, `rm`, `upload`, or `extract`
 - **THEN** the listing is served and every write attempt is rejected with `403` before any remote operation
 
 #### Scenario: Editor executes every operation
 
-- **WHEN** a holder of an `editor` share calls `ls`, `mkdir`, `mv`, `rm`, or `upload` on the vdir with a valid session
+- **WHEN** a holder of an `editor` share calls `ls`, `mkdir`, `mv`, `rm`, `upload`, or `extract` on the vdir with a valid session
 - **THEN** each operation executes with the same semantics as for the owner
 
 #### Scenario: Anonymous request to a non-public vdir is rejected
@@ -386,7 +403,7 @@ rejected requests never dial.
 #### Scenario: Public vdir allows anonymous listing only
 
 - **WHEN** an anonymous request lists a public vdir
-- **THEN** the listing is served; the same anonymous request to `mkdir`, `mv`, `rm`, or `upload` on that vdir is rejected with `401`
+- **THEN** the listing is served; the same anonymous request to `mkdir`, `mv`, `rm`, `upload`, or `extract` on that vdir is rejected with `401`
 
 #### Scenario: Invalid sessions are unauthenticated
 
@@ -395,17 +412,17 @@ rejected requests never dial.
 
 #### Scenario: A viewer token lists but cannot write
 
-- **WHEN** a request carries a `viewer` token for the vdir and calls `ls`, then `mkdir`, `mv`, `rm`, or `upload`
+- **WHEN** a request carries a `viewer` token for the vdir and calls `ls`, then `mkdir`, `mv`, `rm`, `upload`, or `extract`
 - **THEN** the listing is served and every write attempt is rejected with `403` before any remote operation
 
 #### Scenario: An editor token executes every operation
 
-- **WHEN** a request carries an `editor` token for the vdir and calls `ls`, `mkdir`, `mv`, `rm`, or `upload`
+- **WHEN** a request carries an `editor` token for the vdir and calls `ls`, `mkdir`, `mv`, `rm`, `upload`, or `extract`
 - **THEN** each operation executes with the same semantics as for the owner
 
 #### Scenario: An owner's viewer token cannot write
 
-- **WHEN** the owner mints a `viewer` token and uses it for `mkdir`, `mv`, `rm`, or `upload`
+- **WHEN** the owner mints a `viewer` token and uses it for `mkdir`, `mv`, `rm`, `upload`, or `extract`
 - **THEN** every write is rejected with `403` despite the owner's own role
 
 #### Scenario: A token on another vdir is forbidden
@@ -432,6 +449,16 @@ rejected requests never dial.
 
 - **WHEN** a wrong-vdir, expired, revoked, or insufficiently granted token request is issued against the test fixture
 - **THEN** no SSH dial is observed
+
+#### Scenario: A revoked grant stops a running extraction
+
+- **WHEN** an `editor`'s share is removed after their extraction started and the job next re-checks access
+- **THEN** the job stops, publishes nothing, and reports a forbidden terminal error
+
+#### Scenario: Another user cannot observe or cancel my extraction
+
+- **WHEN** a user with no write access on the vdir polls or cancels another user's job id
+- **THEN** the response is `403` and the running job is unaffected
 
 ### Requirement: API errors are classified and mapped deterministically
 
@@ -474,3 +501,29 @@ corruption, no cross-talk between targets.
 
 - **WHEN** listings, mutations, and uploads run concurrently against one vdir
 - **THEN** each completes with its own expected outcome and no operation observes another's intermediate state (e.g. no partially written file visible at a target path)
+
+### Requirement: Extraction failures use the filesystem API's error classes
+
+Starting an extraction SHALL map failures that are knowable at request
+time to the same deterministic statuses as the other write operations —
+`400` for a malformed request or a source that is not an archive, `401`
+for a missing or invalid credential, `403` for an insufficient grant,
+`404` for a sandbox rejection or missing source, and `409` for an existing
+target folder — and SHALL never dial for a rejected request. Failures that
+occur after a job was accepted SHALL be reported on the job with a status
+code drawn from the same classes rather than as an HTTP error.
+
+#### Scenario: Creation-time refusals are HTTP statuses
+
+- **WHEN** extraction is requested for a missing path, a non-archive, an existing target folder, or without write access
+- **THEN** the responses are `404`, `400`, `409`, and `401`/`403` respectively, and no job is created
+
+#### Scenario: Post-acceptance failures are job errors
+
+- **WHEN** an accepted extraction later fails a sandbox, permission, conflict, or retry check
+- **THEN** the job reports `failed` with the corresponding status code and message, and nothing is published
+
+#### Scenario: A retryable outage does not become a success
+
+- **WHEN** the connection cannot be re-established within the retry budget during a job
+- **THEN** the job fails with a retryable class status, the target folder does not exist, and its temporary output is removed

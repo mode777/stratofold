@@ -181,3 +181,28 @@ describe("ContextMenu", () => {
     expect(screen.getByTestId("action-download")).toBeInTheDocument();
   });
 });
+
+describe("ContextMenu extraction", () => {
+  it("offers Extract for archive files to writers", async () => {
+    const onExtract = vi.fn();
+    renderMenu("photos.zip", {}, { canWrite: true, onExtract });
+
+    await userEvent.setup().click(screen.getByTestId("action-extract"));
+    expect(onExtract).toHaveBeenCalledWith(expect.objectContaining({ name: "photos.zip" }), "folder/photos.zip");
+  });
+
+  it("never offers Extract to non-writers", () => {
+    renderMenu("photos.zip", {}, { canWrite: false, onExtract: vi.fn() });
+    expect(screen.queryByTestId("action-extract")).not.toBeInTheDocument();
+  });
+
+  it("never offers Extract for non-archives or directories", () => {
+    renderMenu("notes.txt", {}, { canWrite: true, onExtract: vi.fn() });
+    expect(screen.queryByTestId("action-extract")).not.toBeInTheDocument();
+  });
+
+  it("labels the archive kind", () => {
+    renderMenu("photos.zip", {}, { canWrite: true, onExtract: vi.fn() });
+    expect(screen.getByText("Archive")).toBeInTheDocument();
+  });
+});

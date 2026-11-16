@@ -75,6 +75,17 @@ docker run --rm -it -v stratofold-data:/pb_data \
   forward that header so sessions are secure and install-as-app (PWA)
   works, which requires a secure context
   ([pwa spec](../openspec/specs/pwa/spec.md)).
+- **Archives are unpacked on the SSH host, not here.** Extracting a
+  `.zip` streams it from the SSH host and writes every member back, so
+  the *remote* disk needs room for the unpacked tree beside the archive
+  (the archive itself is kept). The Stratofold host buffers nothing
+  beyond a bounded transfer window. In-flight extraction jobs are
+  in-memory: a container restart abandons them, publishing nothing and
+  leaving at most a hidden `.<archive>.sfext-<hex>` directory that the
+  next extraction in that folder sweeps. Extraction is refused for
+  archives over the configured ceilings (100,000 entries, depth 64,
+  50 GiB unpacked), symlink or encrypted entries, and traversal names
+  ([archive-extraction spec](../openspec/specs/archive-extraction/spec.md)).
 - **One port for everything.** `/` (web app), `/api/*`, `/files/*`, and
   `/_/` (admin UI) are all served by the same listener — nothing needs a
   second upstream.

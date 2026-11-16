@@ -244,3 +244,67 @@ export async function mintFileLink(vdirId: string, path: string): Promise<FileLi
   }
   return { url: data.url, expiresAt: data.expires_at };
 }
+
+// ---- Archive extraction (archive-extraction spec) ----
+
+// ExtractJobState is the job's lifecycle state; a job ends in exactly
+// one terminal state.
+export type ExtractJobState = "running" | "succeeded" | "failed" | "canceled";
+export type ExtractJobPhase = "scanning" | "extracting" | "publishing";
+
+export type ExtractJobJson = {
+  id: string;
+  state: ExtractJobState;
+  phase: ExtractJobPhase;
+  path: string;
+  target: string;
+  skipped: number;
+  entriesTotal: number;
+  entriesDone: number;
+  bytesTotal: number;
+  bytesDone: number;
+  currentEntry?: string;
+  error?: { status: number; message: string };
+  startedAt: string;
+  finishedAt?: string;
+};
+
+function extractUrl(vdirId: string, jobId?: string): string {
+  const base = `/api/sf/vdirs/${encodeURIComponent(vdirId)}/extract`;
+  return jobId ? `${base}/${encodeURIComponent(jobId)}` : base;
+}
+
+function asJob(data: { job?: ExtractJobJson }): ExtractJobJson {
+  if (!data.job) throw new ApiFailure("server", 0, "Invalid extraction response");
+  return data.job;
+}
+
+// startExtract asks the server to extract a zip beside itself; the
+// response is the accepted job. A 409 means the target folder already
+// exists and the caller should offer another name.
+export async function startExtract(
+  vdirId: string,
+  path: string,
+  name?: string,
+): Promise<ExtractJobJson> {
+  const body: { path: string; name?: string } = { path };
+  if (name) body.name = name;
+  const resp = await sfFetch(extractUrl(vdirId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return asJob((await resp.json()) as { job?: ExtractJobJson });
+}
+
+// getExtract reads one job's snapshot.
+export async function getExtract(vdirId: string, jobId: string): Promise<ExtractJobJson> {
+  const resp = await sfFetch(extractUrl(vdirId, jobId));
+  return asJob((await resp.json()) as { job?: ExtractJobJson });
+}
+
+// cancelExtract cancels idempotently and returns the resulting snapshot.
+export async function cancelExtract(vdirId: string, jobId: string): Promise<ExtractJobJson> {
+  const resp = await sfFetch(extractUrl(vdirId, jobId), { method: "DELETE" });
+  return asJob((await resp.json()) as { job?: ExtractJobJson });
+}

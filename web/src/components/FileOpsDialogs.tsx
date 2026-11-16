@@ -3,8 +3,9 @@
 // reuses FailureState so the deterministic error classes render as the
 // established states, with a working retry on 503.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { mkdir, mv, rm, type ApiFailure, type LsEntry } from "../lib/filesApi";
+import { extractJobs, type ExtractTracker } from "../lib/extractJobs";
 import { joinPath, parentPath } from "../lib/listing";
 import { toApiFailure } from "../lib/records";
 import { Alert, Sheet } from "./Dialog";
@@ -266,4 +267,115 @@ export function DeleteAlert({
       confirmTestid="delete-confirm"
     />
   );
+}
+
+// ExtractSheet confirms an archive extraction (archive-extraction spec):
+// it names the derived folder, lets the user change it, and turns a 409
+// conflict into an alternative-name prompt instead of a dead end.
+export function ExtractSheet({
+  vdirId,
+  entry,
+  path,
+  onClose,
+  onStarted,
+  tracker = extractJobs,
+}: {
+  vdirId: string;
+  entry: LsEntry;
+  path: string;
+  onClose: () => void;
+  onStarted: () => void;
+  tracker?: ExtractTracker;
+}) {
+  const suggested = useMemo(() => derivedFolderName(entry.name), [entry.name]);
+  const [name, setName] = useState(suggested);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<ApiFailure | null>(null);
+  const [conflict, setConflict] = useState(false);
+
+  const submit = async (candidate: string) => {
+    const trimmed = candidate.trim();
+    if (!trimmed) return;
+    setBusy(true);
+    setFailure(null);
+    try {
+      await tracker.start(vdirId, path, trimmed === suggested ? undefined : trimmed);
+      onStarted();
+    } catch (err) {
+      const api = toApiFailure(err);
+      if (api.status === 409) {
+        setConflict(true);
+        setName(nextFreeName(trimmed));
+      } else {
+        setFailure(api);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet label="Extract" onClose={onClose}>
+      <SheetHeader
+        title="Extract"
+        actionLabel="Extract"
+        busy={busy}
+        disabled={!name.trim()}
+        onCancel={onClose}
+        onSubmit={() => void submit(name)}
+        testid="extract-submit"
+      />
+      {failure ? (
+        <div className="pb-6">
+          <FailureState
+            failure={failure}
+            onRetry={failure.kind === "retryable" ? () => void submit(name) : undefined}
+          />
+          <div className="text-center">
+            <button type="button" onClick={onClose} className="text-base text-ios-blue">
+              Close
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {conflict && (
+            <p role="alert" data-testid="extract-conflict" className="mx-4 mb-3 text-xs text-ios-red">
+              “{suggested}” already exists. Choose another folder name.
+            </p>
+          )}
+          <Field
+            id="extract-name"
+            testid="extract-name"
+            value={name}
+            onChange={setName}
+            placeholder="Folder name"
+            autoFocus
+          />
+          <p className="pb-6 text-center text-xs text-ios-secondary/60">
+            {entry.name} will be unpacked into this folder beside it.
+          </p>
+        </>
+      )}
+    </Sheet>
+  );
+}
+
+// derivedFolderName mirrors the server's naming: the archive name with
+// its .zip extension removed. The server stays authoritative; this only
+// fills the field.
+export function derivedFolderName(archiveName: string): string {
+  if (/\.zip$/i.test(archiveName) && archiveName.length > 4) {
+    return archiveName.slice(0, -4);
+  }
+  return archiveName;
+}
+
+// nextFreeName suggests an alternative after a conflict: "photos 2",
+// "photos 3", … — the client-side conversation the API leaves to the
+// caller.
+export function nextFreeName(base: string): string {
+  const match = /^(.*) (\d+)$/.exec(base);
+  if (match) return `${match[1]} ${Number(match[2]) + 1}`;
+  return `${base} 2`;
 }
