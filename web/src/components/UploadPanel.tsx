@@ -11,6 +11,8 @@ import {
   extractJobs,
   isActive as isActiveExtract,
   percentOf,
+  skipNames,
+  skipSummary,
   type ExtractJob,
   type ExtractTracker,
 } from "../lib/extractJobs";
@@ -19,6 +21,7 @@ import {
   ArchiveIcon,
   CircleCheckIcon,
   CircleXIcon,
+  FolderIcon,
   PauseIcon,
   PlayIcon,
   RefreshIcon,
@@ -37,6 +40,16 @@ function isActive(state: UploadItem["state"]): boolean {
 }
 
 function statusText(item: UploadItem): string {
+  // Folder items create a directory (design D3): same lifecycle, no
+  // byte progress.
+  if (item.kind === "folder") {
+    if (item.state === "running") return "Creating folder…";
+    if (item.state === "paused") return "Paused";
+    if (item.state === "completed") return "Done";
+    if (item.state === "failed") return "Failed";
+    if (item.state === "canceled") return "Canceled";
+    return "Queued";
+  }
   const pct = percent(item);
   if (item.state === "running") return pct >= 100 ? "Finishing… (awaiting server confirm)" : `Uploading · ${pct}%`;
   if (item.state === "paused") return `Paused · ${pct}%`;
@@ -53,7 +66,14 @@ function ItemIcon({ item }: { item: UploadItem }) {
       : item.state === "completed"
         ? "bg-emerald-50 text-ios-green"
         : "bg-ios-blue/10 text-ios-blue";
-  const Icon = item.state === "failed" ? WarningIcon : item.state === "completed" ? CircleCheckIcon : DocIcon;
+  const Icon =
+    item.kind === "folder"
+      ? FolderIcon
+      : item.state === "failed"
+        ? WarningIcon
+        : item.state === "completed"
+          ? CircleCheckIcon
+          : DocIcon;
   return (
     <span className={`flex h-9 w-9 items-center justify-center rounded-xl text-sm ${tone}`}>
       <Icon />
@@ -130,6 +150,12 @@ function ExtractionItem({ job, onCancel }: { job: ExtractJob; onCancel: (id: str
           className="mt-3 h-1.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-ios-separator [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-ios-blue [&::-moz-progress-bar]:bg-ios-blue"
         />
       )}
+      {!isActiveExtract(job) && skipSummary(job) && (
+        <p data-testid="extract-skips" className="mt-2 text-xs text-ios-secondary/60">
+          {skipSummary(job)}
+          {skipNames(job) && ` — ${skipNames(job)}`}
+        </p>
+      )}
     </li>
   );
 }
@@ -186,6 +212,7 @@ export function UploadPanel({
             <li
               key={item.id}
               data-testid="upload-item"
+              data-kind={item.kind}
               className="rounded-2xl border border-black/5 bg-ios-card p-4 shadow-sm"
             >
               <div className="flex items-start justify-between gap-3">
@@ -233,7 +260,7 @@ export function UploadPanel({
                 )}
               </div>
 
-              {item.state !== "failed" && item.state !== "canceled" && (
+              {item.kind === "upload" && item.state !== "failed" && item.state !== "canceled" && (
                 <progress
                   data-testid="upload-progress"
                   value={percent(item)}

@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ExtractJobJson } from "./filesApi";
-import { ExtractTracker, percentOf, type ExtractApi } from "./extractJobs";
+import {
+  ExtractTracker,
+  percentOf,
+  skipLabel,
+  skipNames,
+  skipSummary,
+  type ExtractApi,
+} from "./extractJobs";
 
 function job(over: Partial<ExtractJobJson> = {}): ExtractJobJson {
   return {
@@ -112,5 +119,52 @@ describe("percentOf", () => {
     expect(percentOf(tracked({ entriesTotal: 0, entriesDone: 0, bytesTotal: 100, bytesDone: 50 }))).toBe(50);
     expect(percentOf(tracked({ entriesTotal: 0, bytesTotal: 0 }))).toBe(0);
     expect(percentOf(tracked({ state: "succeeded" }))).toBe(100);
+  });
+});
+
+describe("skip reporting", () => {
+  it("renders the split between invalid and metadata skips", () => {
+    expect(skipSummary(job())).toBe("");
+    expect(skipSummary(job({ skipped: 2 }))).toBe("2 skipped (metadata)");
+    expect(skipSummary(job({ skippedInvalid: 1 }))).toBe("1 skipped (invalid)");
+    expect(skipSummary(job({ skipped: 2, skippedInvalid: 1 }))).toBe("3 skipped: 1 invalid, 2 metadata");
+  });
+
+  it("labels the closed reason vocabulary and passes unknowns through", () => {
+    expect(skipLabel("unsafe-name")).toBe("unsafe");
+    expect(skipLabel("depth")).toBe("too deep");
+    expect(skipLabel("symlink")).toBe("link");
+    expect(skipLabel("encrypted")).toBe("encrypted");
+    expect(skipLabel("unsupported-compression")).toBe("unsupported");
+    expect(skipLabel("corrupt")).toBe("corrupt");
+    expect(skipLabel("made-up")).toBe("made-up");
+  });
+
+  it("names the bounded sample with reasons and an overflow marker", () => {
+    expect(skipNames(job())).toBe("");
+    expect(
+      skipNames(
+        job({
+          skippedInvalid: 2,
+          skippedDetails: [
+            { name: "../escape.txt", reason: "unsafe-name" },
+            { name: "secret.txt", reason: "encrypted" },
+          ],
+        }),
+      ),
+    ).toBe("../escape.txt (unsafe), secret.txt (encrypted)");
+    expect(
+      skipNames(
+        job({
+          skippedInvalid: 5,
+          skippedDetails: [
+            { name: "a", reason: "corrupt" },
+            { name: "b", reason: "corrupt" },
+            { name: "c", reason: "corrupt" },
+            { name: "d", reason: "corrupt" },
+          ],
+        }),
+      ),
+    ).toBe("a (corrupt), b (corrupt), c (corrupt), +2 more");
   });
 });

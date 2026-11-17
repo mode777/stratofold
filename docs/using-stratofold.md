@@ -80,6 +80,17 @@ shared with you under "Shared with me"; public vdirs carry a marker
   **Rename**, **Move**, and **Delete** in the context menu (delete asks
   for confirmation first). Viewers see none of these — the UI only
   offers what your role on that vdir allows.
+- Instead of the picker you can **drag & drop**: drop files anywhere on
+  the listing — the empty-directory state included — to upload them into
+  the directory you are browsing (the listing highlights while you
+  drag), or drop whole folders from your file manager. A dropped folder
+  keeps its name and structure: every file inside uploads at the same
+  relative place, and empty folders are created too, so an existing
+  folder tree lands on the SSH host ready to use. Dropped uploads join
+  the same queue as the picker, and anything that cannot be read (for
+  example a folder the browser refuses to enumerate) is named in a
+  dismissible notice while the rest still uploads. Viewers and public
+  visitors get no drop behavior.
 - Owners and editors can **Extract** a `.zip` (context menu): it unpacks
   into a folder named after the archive, right beside it — `docs/photos.zip`
   becomes `docs/photos/`. The archive is read from the SSH host and each
@@ -88,11 +99,16 @@ shared with you under "Shared with me"; public vdirs carry a marker
   appears on **Uploads** and the new folder shows up as soon as the
   unpack finishes; cancel any time before then. If a folder with that
   name already exists the app says so and suggests another name instead
-  of merging. Apple metadata (`__MACOSX/`, `._*`, `.DS_Store`,
-  `Thumbs.db`) is skipped, and an archive that would write outside its
-  own folder, contains links, is password-protected, or expands past the
-  size limit is refused as a whole — nothing partial is ever published.
-  See the
+  of merging. Entries that cannot be extracted safely are skipped and
+  counted rather than failing the whole archive: Apple metadata
+  (`__MACOSX/`, `._*`, `.DS_Store`, `Thumbs.db`) silently, and genuinely
+  invalid entries — names that would write outside the folder, links,
+  password-protected members, unreadable data — reported on the progress
+  row with their names, so one bad entry never costs you the other
+  thousands. An archive from which nothing at all could be extracted
+  (for example a fully password-protected one), or one over the size and
+  entry limits, is still refused as a whole — nothing partial is ever
+  published. See the
   [archive-extraction spec](../openspec/specs/archive-extraction/spec.md).
 
 ## Previews
@@ -145,20 +161,27 @@ Receiver** — no receiver app has to be installed:
 
 ## Uploads
 
-Select files in the folder header of any directory you may write to;
-uploads go into an in-app queue — one at a time, in the order you added
-them — that keeps running while you navigate elsewhere
+Select files in the folder header of any directory you may write to, or
+drag files and folders onto its listing (see above); uploads go into an
+in-app queue — one at a time, in the order you added them — that keeps
+running while you navigate elsewhere
 ([upload-queue spec](../openspec/specs/upload-queue/spec.md)).
 
 - The **Uploads** destination shows the queue; a floating indicator on
   other screens shows that something is in flight.
+- Folder drops show up as **Creating folder** steps that run before the
+  files they contain. Canceling or failing one also cancels or fails the
+  files inside it that had not started yet, and retrying it brings them
+  back — so one refused folder never produces a pile of separate errors.
 - Each upload reports progress and can be **paused**, **canceled**, or,
   after a failure, **retried**. Failures that can't succeed (for example
   a permission rejection) are marked permanent and are not retried
   automatically.
 - A canceled or failed upload restarts from the beginning; nothing is
   published partially — an upload appears in the folder only once it is
-  fully on the SSH host.
+  fully on the SSH host. A file — or a dropped folder — that finishes
+  while you are still browsing its directory appears in the listing
+  without a reload.
 
 ## Sharing a vdir
 

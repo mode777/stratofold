@@ -80,6 +80,17 @@ var (
 	ErrRetriesExhausted = errors.New("archiveextract: operation failed after exhausting the retry budget")
 )
 
+// Classification sentinels distinguish which rule an entry broke, so scan
+// can record a skip reason (design D2) without changing the public error
+// taxonomy: every sentinel below still wraps its owning error above.
+var (
+	errUnsafeName = errors.New("unsafe entry name")
+	errEntryDepth = errors.New("entry too deep")
+	errSymlink    = errors.New("symbolic link entry")
+	errEncrypted  = errors.New("encrypted entry")
+	errCompress   = errors.New("unsupported compression method")
+)
+
 // Status maps an extraction error to the HTTP status the API reports for
 // it. ok is false for errors this package does not classify, letting the
 // API layer apply its own mapping.

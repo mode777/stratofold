@@ -8,6 +8,7 @@ import (
 	"errors"
 	"hash/crc32"
 	"io"
+	"strings"
 	"testing"
 )
 
@@ -212,6 +213,14 @@ func buildZip(t *testing.T, files map[string]string) []byte {
 	w := zip.NewWriter(&buf)
 	// Deterministic order: map iteration is not.
 	for _, name := range sortedKeys(files) {
+		if strings.HasSuffix(name, "/") {
+			// A real directory entry, the way zip tools emit them
+			// (the trailing slash is the directory marker).
+			if _, err := w.CreateHeader(&zip.FileHeader{Name: name}); err != nil {
+				t.Fatalf("create dir %s: %v", name, err)
+			}
+			continue
+		}
 		fw, err := w.Create(name)
 		if err != nil {
 			t.Fatalf("create %s: %v", name, err)

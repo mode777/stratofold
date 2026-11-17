@@ -126,7 +126,8 @@ the specs and files that own each fact.
   conditional matrices, operation/retry/authz, disconnect-resume,
   concurrency); the R5 memory ceiling and sustained-concurrency gates
   run with `SF_RUN_GATES=1 go test ./internal/fsapi/ -run Gate`.
-- **Archive extraction** (change `add-archive-extraction`): `POST
+- **Archive extraction** (change `add-archive-extraction`, updated by
+  `skip-invalid-archive-entries`): `POST
   /api/sf/vdirs/<vdir-id>/extract` streams a remote `.zip` into an
   equally named folder beside it (`docs/photos.zip` → `docs/photos/`)
   without downloading it; `{"path": …}` plus an optional single-segment
@@ -141,17 +142,31 @@ the specs and files that own each fact.
   rename (`PosixRename`, `Rename` fallback) — a partial folder is never
   browsable and failures/cancels leave nothing. Entry names use a
   **strict** validator, not `vdirpath.Resolve` (which normalizes
-  `a/../b`): traversal segments, absolute paths, backslashes, NUL,
-  invalid UTF-8, symlink entries, and encrypted entries fail the whole
-  archive; `__MACOSX/`, `._*`, `.DS_Store`, `Thumbs.db` are skipped and
-  counted. Ceilings (100k entries, depth 64, 50 GiB *inflated*) are
-  enforced on a running counter, and write access is re-checked between
-  member batches so a revoked share stops the job. `ls` hides only
-  Stratofold's own scratch names (`.sfpart-`/`.sfext-` + 16 hex), never
-  real dotfiles. Verification: `go test ./internal/archiveextract/
-  ./internal/fsapi/` (strict-entry matrix, ceiling/bomb, fixture runs,
-  authz/observation/cancel) plus the `SF_RUN_GATES=1` and
-  `SF_TESTSSH_MODE=external` runs recorded in the change's tasks.
+  `a/../b`); the zip convention of one trailing `/` marking a directory
+  entry is accepted. Invalid entries are **skipped and counted, never
+  written, never rewritten** (skip-and-count, ADR 0017 job model
+  unchanged): traversal segments, absolute paths, backslashes, NUL,
+  invalid UTF-8, over-depth paths, symlink entries, encrypted entries,
+  unsupported compression methods, and undecodable member data (the
+  partial file is removed first) each record `{name, reason}` from the
+  closed vocabulary `unsafe-name|depth|symlink|encrypted|
+  unsupported-compression|corrupt`; the job snapshot reports
+  `skippedInvalid` plus a bounded `skippedDetails` sample (16) beside
+  the cosmetic `skipped` count, and the rest of the archive extracts.
+  An extraction that extracts **nothing** (every non-cosmetic entry
+  skipped, cosmetic-only, or an empty archive) fails with an explicit
+  `nothing could be extracted` error naming the dominant reason.
+  `__MACOSX/`, `._*`, `.DS_Store`, `Thumbs.db` remain silently skipped
+  and counted. The byte ceiling (50 GiB inflated) and the entry ceiling
+  (100k records — every central-directory record counts, skipped or
+  not) stay fatal, and write access is re-checked between member batches
+  so a revoked share stops the job. `ls` hides
+  only Stratofold's own scratch names (`.sfpart-`/`.sfext-` + 16 hex),
+  never real dotfiles. Verification: `go test ./internal/archiveextract/
+  ./internal/fsapi/` (skip matrices, guard, corrupt-member cleanup,
+  entry-ceiling counting, fixture runs, authz/observation/cancel) plus
+  the `SF_RUN_GATES=1` and `SF_TESTSSH_MODE=external` runs recorded in
+  the change's tasks.
 - **Sharing** (roadmap change 6): `vdir_shares` records
   (`vdir`, `user`, `role` ∈ `viewer`|`editor`, unique per pair) are
   managed over the record API by the vdir's owner; grantees see their
@@ -363,11 +378,20 @@ the specs and files that own each fact.
   The transport is `XMLHttpRequest` (upload progress + abort); a
   canceled or failed upload restarts from byte zero (no cross-request
   resume protocol), and permanent classes are never auto-retried.
+  Drag & drop (change `add-drag-drop-uploads`) makes the listing a
+  writer-gated drop zone: `lib/dragDrop.ts` walks `webkitGetAsEntry`
+  entries (folder names preserved, `readEntries` paged to an empty
+  batch, unreadable entries reported not silently dropped), and the
+  queue's folder items mkdir ahead of their files — a folder item's
+  cancel/terminal failure carries to its pending dependents and its
+  retry restores them. Completed items refresh the browsed listing.
   Verification: `npm --prefix web run test` (queue unit tests, role
-  matrix, action/error component tests); E2E on the verification server
-  via `web/e2e/file-management.spec.ts` (small+large upload,
-  navigate-away R7 acceptance, mutation flows, viewer gating,
-  permanent-failure no-retry-storm).
+  matrix, drag traversal/drop-zone tests, action/error component tests);
+  E2E on the verification server via `web/e2e/file-management.spec.ts`
+  (small+large upload, navigate-away R7 acceptance, mutation flows,
+  viewer gating, permanent-failure no-retry-storm) and
+  `web/e2e/drag-drop-uploads.spec.ts` (synthesized file drops; directory
+  drags are unit-gated).
 - **Archive extraction in the SPA** (change `add-archive-extraction`):
   `.zip` entries classify as their own `archive` kind
   (`web/src/lib/entryKind.ts`) and writers get **Extract** in the

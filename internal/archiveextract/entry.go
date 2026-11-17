@@ -13,31 +13,34 @@ import (
 // segment, an absolute name, a backslash, a NUL byte, invalid UTF-8, or
 // an over-deep path is refused, so two entries can never collapse onto
 // one path and a hostile archive's intent is refused rather than erased.
+// One trailing slash is the zip convention for a directory entry and is
+// accepted: it is stripped before segment validation, so `docs/` is the
+// directory `docs`, not an empty final segment.
 func ValidateEntryName(name string) ([]string, error) {
 	if name == "" {
-		return nil, fmt.Errorf("%w: empty name", ErrUnsafeEntry)
+		return nil, fmt.Errorf("%w: %w: empty name", ErrUnsafeEntry, errUnsafeName)
 	}
 	if !utf8.ValidString(name) {
-		return nil, fmt.Errorf("%w: %q has invalid UTF-8", ErrUnsafeEntry, name)
+		return nil, fmt.Errorf("%w: %w: %q has invalid UTF-8", ErrUnsafeEntry, errUnsafeName, name)
 	}
 	if strings.ContainsRune(name, 0) {
-		return nil, fmt.Errorf("%w: %q contains a NUL byte", ErrUnsafeEntry, name)
+		return nil, fmt.Errorf("%w: %w: %q contains a NUL byte", ErrUnsafeEntry, errUnsafeName, name)
 	}
 	if strings.HasPrefix(name, "/") {
-		return nil, fmt.Errorf("%w: %q is absolute", ErrUnsafeEntry, name)
+		return nil, fmt.Errorf("%w: %w: %q is absolute", ErrUnsafeEntry, errUnsafeName, name)
 	}
 	if strings.ContainsRune(name, '\\') {
-		return nil, fmt.Errorf("%w: %q contains a backslash", ErrUnsafeEntry, name)
+		return nil, fmt.Errorf("%w: %w: %q contains a backslash", ErrUnsafeEntry, errUnsafeName, name)
 	}
-	segs := strings.Split(name, "/")
+	segs := strings.Split(strings.TrimSuffix(name, "/"), "/")
 	for _, s := range segs {
 		switch s {
 		case "", ".", "..":
-			return nil, fmt.Errorf("%w: %q has an empty, dotted, or traversing segment", ErrUnsafeEntry, name)
+			return nil, fmt.Errorf("%w: %w: %q has an empty, dotted, or traversing segment", ErrUnsafeEntry, errUnsafeName, name)
 		}
 	}
 	if len(segs) > MaxDepth {
-		return nil, fmt.Errorf("%w: %q is %d levels deep (max %d)", ErrUnsafeEntry, name, len(segs), MaxDepth)
+		return nil, fmt.Errorf("%w: %w: %q is %d levels deep (max %d)", ErrUnsafeEntry, errEntryDepth, name, len(segs), MaxDepth)
 	}
 	return segs, nil
 }

@@ -81,16 +81,19 @@ func TestExtractArchiveShapes(t *testing.T) {
 		}
 	})
 
-	t.Run("empty archive publishes an empty folder", func(t *testing.T) {
+	t.Run("empty archive is not an empty success", func(t *testing.T) {
 		e, done := startEnv(t)
 		defer done()
 		e.put(t, "empty.zip", buildZip(t, map[string]string{}))
 		snap := runRequest(t, e, "empty.zip", "empty")
-		if snap.State != StateSucceeded {
-			t.Fatalf("state = %s (%+v)", snap.State, snap.Error)
+		if snap.State != StateFailed {
+			t.Fatalf("state = %s (%+v), want failed", snap.State, snap.Error)
 		}
-		if names := e.list(t); !contains(names, "empty") {
-			t.Fatalf("empty folder not published: %v", names)
+		if snap.Error == nil || !strings.Contains(snap.Error.Message, "nothing could be extracted") {
+			t.Fatalf("error = %+v, want the nothing-extracted wording", snap.Error)
+		}
+		if names := e.list(t); contains(names, "empty") {
+			t.Fatalf("empty folder published: %v", names)
 		}
 	})
 

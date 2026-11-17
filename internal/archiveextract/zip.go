@@ -57,15 +57,15 @@ func Open(ctx context.Context, tr rangedReader, size int64) (*zip.Reader, error)
 // encrypted entries and compression methods other than store/deflate.
 func CheckSupported(f *zip.File) error {
 	if f.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%w: entry %q is a symbolic link", ErrUnsafeEntry, f.Name)
+		return fmt.Errorf("%w: %w: entry %q is a symbolic link", ErrUnsafeEntry, errSymlink, f.Name)
 	}
 	if f.Flags&0x1 != 0 {
-		return fmt.Errorf("%w: entry %q is encrypted", ErrUnsupportedArchive, f.Name)
+		return fmt.Errorf("%w: %w: entry %q is encrypted", ErrUnsupportedArchive, errEncrypted, f.Name)
 	}
 	switch f.Method {
 	case zip.Store, zip.Deflate:
 		return nil
 	default:
-		return fmt.Errorf("%w: entry %q uses unsupported compression method %d", ErrUnsupportedArchive, f.Name, f.Method)
+		return fmt.Errorf("%w: %w: entry %q uses unsupported compression method %d", ErrUnsupportedArchive, errCompress, f.Name, f.Method)
 	}
 }

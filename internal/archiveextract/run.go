@@ -134,6 +134,16 @@ func run(ctx context.Context, req Request, temp string, j *Job) (err error) {
 		}
 	}
 
+	// Nothing was extracted at all — every entry was skipped as invalid
+	// (or the archive holds nothing but cosmetic metadata): an empty
+	// folder is never presented as a successful result (design D5).
+	if j.Snapshot().EntriesDone == 0 {
+		if reason, ok := j.dominantSkip(); ok {
+			return fmt.Errorf("%w: nothing could be extracted: every entry was skipped as %s", ErrUnsupportedArchive, reason)
+		}
+		return fmt.Errorf("%w: nothing could be extracted: the archive contains no extractable entries", ErrUnsupportedArchive)
+	}
+
 	j.setPhase(PhasePublishing)
 	if err := checkAccess(ctx, req); err != nil {
 		return err
@@ -161,10 +171,11 @@ type member struct {
 	segs []string
 }
 
-// scan validates every entry, skips cosmetic metadata, and computes the
-// advisory totals a job reports before extraction starts (design D7). The
-// declared sizes are only a pre-flight warning: enforcement happens on
-// inflated bytes.
+// scan validates every entry, skips cosmetic metadata, computes the
+// advisory totals a job reports before extraction starts (design D7), and
+// — since invalid entries skip instead of failing the job — records one
+// skip per refused entry (design D2). The declared sizes are only a
+// pre-flight warning: enforcement happens on inflated bytes.
 func scan(ctx context.Context, zr *zip.Reader, j *Job, entryCeiling int) ([]member, error) {
 	out := make([]member, 0, len(zr.File))
 	var declared int64
@@ -174,36 +185,60 @@ func scan(ctx context.Context, zr *zip.Reader, j *Job, entryCeiling int) ([]memb
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		segs, err := ValidateEntryName(f.Name)
-		if err != nil {
-			return nil, err
-		}
-		if err := CheckSupported(f); err != nil {
-			return nil, err
-		}
+		// Every central-directory record counts toward the ceiling
+		// before validation (design D6): an archive made of invalid
+		// entries cannot dodge the scan bound.
 		entries++
 		if entries > entryCeiling {
 			return nil, fmt.Errorf("%w: archive has more than %d entries", ErrBudget, entryCeiling)
 		}
-		// The declared size only feeds the advisory totals the job
-		// reports; the enforced ceiling counts bytes actually inflated
-		// (design D7), because a declared size is attacker-controlled.
-		declared += int64(f.UncompressedSize64)
-		if IsCosmetic(segs) {
+		if segs, err := ValidateEntryName(f.Name); err != nil {
+			j.skipInvalid(f.Name, skipReason(err))
+			continue
+		} else if err := CheckSupported(f); err != nil {
+			j.skipInvalid(f.Name, skipReason(err))
+			continue
+		} else if IsCosmetic(segs) {
 			skipped++
 			continue
+		} else {
+			// The declared size only feeds the advisory totals the
+			// job reports; the enforced ceiling counts bytes actually
+			// inflated (design D7), because a declared size is
+			// attacker-controlled.
+			declared += int64(f.UncompressedSize64)
+			out = append(out, member{f: f, segs: segs})
 		}
-		out = append(out, member{f: f, segs: segs})
 	}
 	j.setTotals(len(out), declared)
 	j.setSkipped(skipped)
 	return out, nil
 }
 
+// skipReason maps an entry validation error to its skip reason (design
+// D2's closed vocabulary); anything unclassified is a name rule.
+func skipReason(err error) SkipReason {
+	switch {
+	case errors.Is(err, errEntryDepth):
+		return ReasonDepth
+	case errors.Is(err, errSymlink):
+		return ReasonSymlink
+	case errors.Is(err, errEncrypted):
+		return ReasonEncrypted
+	case errors.Is(err, errCompress):
+		return ReasonUnsupportedCompression
+	default:
+		return ReasonUnsafeName
+	}
+}
+
 // extractMember writes one member into the scratch directory. A member's
 // bytes go through the budget reader into the resumable transfer, so an
 // entry that inflates past the ceiling fails instead of filling the
-// remote disk.
+// remote disk. A member whose own bytes cannot be read (checksum
+// mismatch, broken stream) is skipped: its partial output is removed and
+// the extraction continues (design D4) — no truncated member is ever
+// published.
 func extractMember(ctx context.Context, req Request, j *Job, temp string, dirs *dirCache, m member) error {
 	j.entryStarted(m.f.Name)
 	target := temp + "/" + strings.Join(m.segs, "/")
@@ -221,7 +256,11 @@ func extractMember(ctx context.Context, req Request, j *Job, temp string, dirs *
 
 	rc, err := m.f.Open()
 	if err != nil {
-		return fmt.Errorf("%w: entry %q: %v", ErrUnsupportedArchive, m.f.Name, err)
+		// The member's own data cannot even be opened — an
+		// entry-quality failure like a broken stream, not a connection
+		// problem: skip it (design D4).
+		j.skipInvalid(m.f.Name, ReasonCorrupt)
+		return nil
 	}
 	defer func() { _ = rc.Close() }()
 
@@ -237,7 +276,19 @@ func extractMember(ctx context.Context, req Request, j *Job, temp string, dirs *
 			if errors.Is(err, ErrBudget) {
 				return fmt.Errorf("%w: extraction would exceed %d bytes", ErrBudget, req.byteCeiling())
 			}
-			return fmt.Errorf("%w: entry %q could not be read: %v", ErrUnsupportedArchive, m.f.Name, readErr)
+			// The member's stored bytes are unreadable (checksum
+			// mismatch, broken stream). Remove the partial file so no
+			// truncated member can be published with the folder, then
+			// skip and continue (design D4). A removal that itself
+			// fails must fail the job: publishing a truncated member
+			// is worse than losing the extraction.
+			if rerr := withRetry(ctx, req.Provider, 8, func(cl client) error {
+				return cl.Remove(target)
+			}); rerr != nil {
+				return fmt.Errorf("archiveextract: remove partial member %q after %v: %w", m.f.Name, readErr, rerr)
+			}
+			j.skipInvalid(m.f.Name, ReasonCorrupt)
+			return nil
 		}
 		return err
 	}

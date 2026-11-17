@@ -102,6 +102,23 @@ func (e *fixtureEnv) list(t *testing.T) []string {
 	return out
 }
 
+// isDir reports whether rel exists as a directory, for asserting that
+// explicit directory entries created their folder.
+func (e *fixtureEnv) isDir(t *testing.T, rel string) bool {
+	t.Helper()
+	cl, err := e.f.SSHClient()
+	if err != nil {
+		t.Fatalf("ssh: %v", err)
+	}
+	scl, err := sftp.NewClient(cl)
+	if err != nil {
+		t.Fatalf("sftp: %v", err)
+	}
+	defer scl.Close()
+	fi, err := scl.Stat(e.dir + "/" + rel)
+	return err == nil && fi.IsDir()
+}
+
 func (e *fixtureEnv) read(t *testing.T, rel string) ([]byte, error) {
 	t.Helper()
 	cl, err := e.f.SSHClient()
@@ -229,19 +246,53 @@ func TestExtractPublishesTheFolder(t *testing.T) {
 	}
 }
 
-// TestExtractRefusesUnsafeEntries covers the fail-closed matrix: every
-// hostile name fails the job, publishes nothing, and leaves no scratch.
-func TestExtractRefusesUnsafeEntries(t *testing.T) {
+// TestExtractDirectoryEntriesWithTrailingSlash is the reported-regression
+// shape: real zip tools mark directory entries with a trailing slash, and
+// that slash must read as the directory marker, not an empty segment.
+func TestExtractDirectoryEntriesWithTrailingSlash(t *testing.T) {
+	e, done := startEnv(t)
+	defer done()
+
+	e.put(t, "poly.zip", buildZip(t, map[string]string{
+		"POLY_SurvivalWorkshop/":              "",
+		"POLY_SurvivalWorkshop/readme.txt":    "the workshop",
+		"POLY_SurvivalWorkshop/blueprints/":   "",
+		"POLY_SurvivalWorkshop/blueprints/ox": "oxidizer",
+	}))
+	snap := runRequest(t, e, "poly.zip", "POLY_SurvivalWorkshop")
+	if snap.State != StateSucceeded {
+		t.Fatalf("state = %s (%+v)", snap.State, snap.Error)
+	}
+	if snap.Skipped != 0 {
+		t.Fatalf("skipped = %d, want 0 (directory entries are not skips)", snap.Skipped)
+	}
+	if got, err := e.read(t, "POLY_SurvivalWorkshop/POLY_SurvivalWorkshop/readme.txt"); err != nil || string(got) != "the workshop" {
+		t.Fatalf("readme.txt = %q, %v", got, err)
+	}
+	if got, err := e.read(t, "POLY_SurvivalWorkshop/POLY_SurvivalWorkshop/blueprints/ox"); err != nil || string(got) != "oxidizer" {
+		t.Fatalf("blueprints/ox = %q, %v", got, err)
+	}
+	// The explicit empty directory exists too, not just the file paths.
+	if !e.isDir(t, "POLY_SurvivalWorkshop/POLY_SurvivalWorkshop/blueprints") {
+		t.Fatal("explicit directory entry did not create the directory")
+	}
+}
+
+// TestExtractSkipsUnsafeEntries covers the skip matrix: every hostile
+// name skips its entry, the rest of the archive publishes, and the skip
+// is counted and named.
+func TestExtractSkipsUnsafeEntries(t *testing.T) {
 	cases := []struct {
-		name  string
-		entry string
+		name   string
+		entry  string
+		reason SkipReason
 	}{
-		{"traversal", "../escape.txt"},
-		{"nested traversal", "a/../../escape.txt"},
-		{"normalizing pair", "a/../b.txt"},
-		{"absolute", "/etc/passwd"},
-		{"backslash", `a\b.txt`},
-		{"nul", "a\x00b.txt"},
+		{"traversal", "../escape.txt", ReasonUnsafeName},
+		{"nested traversal", "a/../../escape.txt", ReasonUnsafeName},
+		{"normalizing pair", "a/../b.txt", ReasonUnsafeName},
+		{"absolute", "/etc/passwd", ReasonUnsafeName},
+		{"backslash", `a\b.txt`, ReasonUnsafeName},
+		{"nul", "a\x00b.txt", ReasonUnsafeName},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -249,21 +300,31 @@ func TestExtractRefusesUnsafeEntries(t *testing.T) {
 			defer done()
 			e.put(t, "bad.zip", buildZip(t, map[string]string{tc.entry: "x", "ok.txt": "ok"}))
 			snap := runRequest(t, e, "bad.zip", "bad")
-			if snap.State != StateFailed {
-				t.Fatalf("state = %s, want failed", snap.State)
+			if snap.State != StateSucceeded {
+				t.Fatalf("state = %s (%+v), want succeeded", snap.State, snap.Error)
 			}
-			if snap.Error == nil || snap.Error.Status != 400 {
-				t.Fatalf("error = %+v, want 400", snap.Error)
+			if snap.SkippedInvalid != 1 {
+				t.Fatalf("skippedInvalid = %d, want 1", snap.SkippedInvalid)
 			}
-			if !strings.Contains(snap.Error.Message, fmt.Sprintf("%q", tc.entry)) {
-				t.Fatalf("error %q should name the offending entry %q", snap.Error.Message, tc.entry)
+			if len(snap.SkippedDetails) != 1 || snap.SkippedDetails[0].Name != tc.entry ||
+				snap.SkippedDetails[0].Reason != string(tc.reason) {
+				t.Fatalf("skippedDetails = %+v, want [%s %s]", snap.SkippedDetails, tc.entry, tc.reason)
 			}
-			assertNothingPublished(t, e, "bad")
+			if got, err := e.read(t, "bad/ok.txt"); err != nil || string(got) != "ok" {
+				t.Fatalf("ok.txt = %q, %v — the rest of the archive must publish", got, err)
+			}
+			// The hostile entry itself never landed anywhere.
+			if _, err := e.read(t, "bad/escape.txt"); err == nil {
+				t.Fatal("escape.txt exists inside the target folder")
+			}
+			if scratch := scratchEntries(e.list(t)); len(scratch) != 0 {
+				t.Fatalf("scratch remnants left: %v", scratch)
+			}
 		})
 	}
 }
 
-func TestExtractRefusesSymlinkEntry(t *testing.T) {
+func TestExtractSkipsSymlinkEntry(t *testing.T) {
 	e, done := startEnv(t)
 	defer done()
 
@@ -278,51 +339,144 @@ func TestExtractRefusesSymlinkEntry(t *testing.T) {
 	if _, err := fw.Write([]byte("/etc")); err != nil {
 		t.Fatalf("write symlink: %v", err)
 	}
+	ok, err := w.Create("ok.txt")
+	if err != nil {
+		t.Fatalf("create ok.txt: %v", err)
+	}
+	if _, err := ok.Write([]byte("ok")); err != nil {
+		t.Fatalf("write ok.txt: %v", err)
+	}
 	if err := w.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 	e.put(t, "link.zip", buf.Bytes())
 
-	// The symlink itself is a valid entry name; the mode makes it unsafe
-	// because extraction would create a link.
+	// The symlink itself has a valid entry name; the mode makes it unsafe
+	// because extraction would create a link. It skips, the rest extracts,
+	// and no link is ever created.
 	snap := runRequest(t, e, "link.zip", "link")
-	if snap.State == StateSucceeded {
-		t.Fatalf("a symlink entry must not extract")
+	if snap.State != StateSucceeded {
+		t.Fatalf("state = %s (%+v)", snap.State, snap.Error)
 	}
-	if snap.Error == nil || snap.Error.Status != 400 {
-		t.Fatalf("error = %+v, want 400", snap.Error)
+	if snap.SkippedInvalid != 1 || len(snap.SkippedDetails) != 1 ||
+		snap.SkippedDetails[0].Name != "link" || snap.SkippedDetails[0].Reason != string(ReasonSymlink) {
+		t.Fatalf("snapshot skips = %+v", snap)
 	}
-	assertNothingPublished(t, e, "link")
+	if _, err := e.read(t, "link/link"); err == nil {
+		t.Fatal("a symlink entry must not extract, inside or outside the folder")
+	}
+	if got, err := e.read(t, "link/ok.txt"); err != nil || string(got) != "ok" {
+		t.Fatalf("ok.txt = %q, %v", got, err)
+	}
 }
 
-func TestExtractRefusesEncryptedAndUnsupported(t *testing.T) {
-	e, done := startEnv(t)
-	defer done()
-
+// buildEncryptedAndUnsupportedZip hand-assembles an archive mixing an
+// encrypted entry and a bzip2-compressed entry (the Go writer emits
+// neither) beside a plain member.
+func buildEncryptedAndUnsupportedZip(t *testing.T) []byte {
+	t.Helper()
 	var buf bytes.Buffer
 	w := zip.NewWriter(&buf)
-	h := &zip.FileHeader{Name: "secret.txt", Method: zip.Deflate}
-	h.Flags |= 0x1 // encrypted
-	fw, err := w.CreateHeader(h)
+	enc := &zip.FileHeader{Name: "secret.txt", Method: zip.Deflate}
+	enc.Flags |= 0x1 // encrypted
+	fw, err := w.CreateHeader(enc)
 	if err != nil {
-		t.Fatalf("create: %v", err)
+		t.Fatalf("create encrypted header: %v", err)
 	}
 	if _, err := fw.Write([]byte("x")); err != nil {
-		t.Fatalf("write: %v", err)
+		t.Fatalf("write encrypted: %v", err)
+	}
+	// archive/zip only names Store and Deflate; 12 is bzip2, which the
+	// extractor must refuse to decode.
+	const methodBzip2 = 12
+	if _, err := w.CreateRaw(&zip.FileHeader{Name: "packed.txt", Method: methodBzip2, CRC32: 0}); err != nil {
+		t.Fatalf("create raw bzip2 header: %v", err)
+	}
+	ok, err := w.Create("ok.txt")
+	if err != nil {
+		t.Fatalf("create ok.txt: %v", err)
+	}
+	if _, err := ok.Write([]byte("ok")); err != nil {
+		t.Fatalf("write ok.txt: %v", err)
 	}
 	if err := w.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	e.put(t, "enc.zip", buf.Bytes())
+	return buf.Bytes()
+}
 
-	snap := runRequest(t, e, "enc.zip", "enc")
+func TestExtractSkipsEncryptedAndUnsupportedEntries(t *testing.T) {
+	e, done := startEnv(t)
+	defer done()
+	e.put(t, "mixed.zip", buildEncryptedAndUnsupportedZip(t))
+
+	snap := runRequest(t, e, "mixed.zip", "mixed")
+	if snap.State != StateSucceeded {
+		t.Fatalf("state = %s (%+v)", snap.State, snap.Error)
+	}
+	if snap.SkippedInvalid != 2 {
+		t.Fatalf("skippedInvalid = %d, want 2", snap.SkippedInvalid)
+	}
+	byName := map[string]string{}
+	for _, d := range snap.SkippedDetails {
+		byName[d.Name] = d.Reason
+	}
+	if byName["secret.txt"] != string(ReasonEncrypted) {
+		t.Fatalf("secret.txt reason = %q, want encrypted", byName["secret.txt"])
+	}
+	if byName["packed.txt"] != string(ReasonUnsupportedCompression) {
+		t.Fatalf("packed.txt reason = %q, want unsupported-compression", byName["packed.txt"])
+	}
+	if got, err := e.read(t, "mixed/ok.txt"); err != nil || string(got) != "ok" {
+		t.Fatalf("ok.txt = %q, %v", got, err)
+	}
+}
+
+// TestExtractSkipsOverDeepEntry: an entry beyond the depth bound is
+// skipped and counted while the rest of the archive extracts (the depth
+// ceiling moved from a job failure to a per-entry skip).
+func TestExtractSkipsOverDeepEntry(t *testing.T) {
+	e, done := startEnv(t)
+	defer done()
+
+	deep := strings.Repeat("d/", MaxDepth) + "f.txt" // MaxDepth+1 segments
+	e.put(t, "deep.zip", buildZip(t, map[string]string{
+		deep:     "x",
+		"ok.txt": "ok",
+	}))
+	snap := runRequest(t, e, "deep.zip", "deep")
+	if snap.State != StateSucceeded {
+		t.Fatalf("state = %s (%+v)", snap.State, snap.Error)
+	}
+	if snap.SkippedInvalid != 1 || len(snap.SkippedDetails) != 1 ||
+		snap.SkippedDetails[0].Reason != string(ReasonDepth) {
+		t.Fatalf("snapshot skips = %+v, want one depth skip", snap)
+	}
+	if got, err := e.read(t, "deep/ok.txt"); err != nil || string(got) != "ok" {
+		t.Fatalf("ok.txt = %q, %v", got, err)
+	}
+}
+
+// TestExtractEntryCeilingCountsInvalidEntries: an archive of mostly
+// invalid entries cannot dodge the entry-count ceiling — every
+// central-directory record counts (design D6).
+func TestExtractEntryCeilingCountsInvalidEntries(t *testing.T) {
+	e, done := startEnv(t)
+	defer done()
+
+	files := map[string]string{}
+	for i := 0; i < 5; i++ {
+		files[fmt.Sprintf("../bad%d.txt", i)] = "x"
+	}
+	e.put(t, "hostile.zip", buildZip(t, files))
+	snap := runRequest(t, e, "hostile.zip", "hostile", func(r *Request) { r.MaxEntries = 2 })
 	if snap.State != StateFailed || snap.Error == nil || snap.Error.Status != 400 {
-		t.Fatalf("snapshot = %+v, want a 400 failure", snap)
+		t.Fatalf("snapshot = %+v, want a 400 ceiling failure", snap)
 	}
-	if !strings.Contains(snap.Error.Message, "encrypted") {
-		t.Fatalf("message = %q, want it to say encrypted", snap.Error.Message)
+	if !strings.Contains(snap.Error.Message, "entries") {
+		t.Fatalf("message = %q, want the entry ceiling", snap.Error.Message)
 	}
-	assertNothingPublished(t, e, "enc")
+	assertNothingPublished(t, e, "hostile")
 }
 
 // TestExtractStopsTheBomb: the ceiling counts bytes actually inflated, so
@@ -345,6 +499,72 @@ func TestExtractStopsTheBomb(t *testing.T) {
 		t.Fatalf("error = %+v, want a 400 ceiling failure", snap.Error)
 	}
 	assertNothingPublished(t, e, "bomb")
+}
+
+// TestExtractNothingExtractedGuard covers the all-skipped guard (design
+// D5): when no member was extracted the job fails explicitly and
+// publishes nothing, naming the dominant reason.
+func TestExtractNothingExtractedGuard(t *testing.T) {
+	cosmeticOnly := buildZip(t, map[string]string{
+		".DS_Store":    "junk",
+		"__MACOSX/._a": "junk",
+		"Thumbs.db":    "junk",
+	})
+	allTraversal := buildZip(t, map[string]string{
+		"../escape.txt": "x",
+		"../other.txt":  "y",
+	})
+	var encryptedOnly bytes.Buffer
+	w := zip.NewWriter(&encryptedOnly)
+	h := &zip.FileHeader{Name: "secret.txt", Method: zip.Deflate}
+	h.Flags |= 0x1 // encrypted
+	fw, err := w.CreateHeader(h)
+	if err != nil {
+		panic(err)
+	}
+	if _, err := fw.Write([]byte("x")); err != nil {
+		panic(err)
+	}
+	if err := w.Close(); err != nil {
+		panic(err)
+	}
+
+	cases := []struct {
+		name    string
+		archive []byte
+		reason  string // "" = the no-extractable-entries wording
+		skips   bool   // whether skips must be reported with the failure
+	}{
+		{"all traversal", allTraversal, string(ReasonUnsafeName), true},
+		{"fully encrypted", encryptedOnly.Bytes(), string(ReasonEncrypted), true},
+		{"cosmetic only", cosmeticOnly, "", true},
+		{"empty archive", buildZip(t, map[string]string{}), "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e, done := startEnv(t)
+			defer done()
+			e.put(t, "none.zip", tc.archive)
+			snap := runRequest(t, e, "none.zip", "none")
+			if snap.State != StateFailed {
+				t.Fatalf("state = %s (%+v), want failed", snap.State, snap.Error)
+			}
+			if snap.Error == nil || snap.Error.Status != 400 {
+				t.Fatalf("error = %+v, want a 400 failure", snap.Error)
+			}
+			if !strings.Contains(snap.Error.Message, "nothing could be extracted") {
+				t.Fatalf("message = %q, want the nothing-extracted wording", snap.Error.Message)
+			}
+			if tc.reason != "" && !strings.Contains(snap.Error.Message, tc.reason) {
+				t.Fatalf("message = %q, want it to name the reason %q", snap.Error.Message, tc.reason)
+			}
+			// The skip counts are still reported with the failure.
+			if tc.skips && snap.SkippedInvalid == 0 && snap.Skipped == 0 {
+				t.Fatalf("snapshot reports no skips: %+v", snap)
+			}
+			assertNothingPublished(t, e, "none")
+		})
+	}
 }
 
 // TestExtractRefusesLyingDeclaredSize: an archive whose central directory
@@ -381,24 +601,35 @@ func TestExtractEntryCeiling(t *testing.T) {
 	assertNothingPublished(t, e, "many")
 }
 
-// TestExtractChecksumMismatchFails loudly instead of publishing
-// corrupted content.
-func TestExtractChecksumMismatchFails(t *testing.T) {
+// TestExtractCorruptMemberSkips: a member whose stored data fails its
+// checksum is skipped — partial output removed, skip counted with the
+// corrupt reason — while intact members publish byte-identical.
+func TestExtractCorruptMemberSkips(t *testing.T) {
 	e, done := startEnv(t)
 	defer done()
 
-	archive := buildZip(t, map[string]string{"data.txt": strings.Repeat("abcdefgh", 64)})
-	corrupt := flipPayloadByte(t, archive)
-	e.put(t, "corrupt.zip", corrupt)
+	// Sorted order puts data.txt first, so flipPayloadByte corrupts it.
+	archive := buildZip(t, map[string]string{
+		"data.txt": strings.Repeat("abcdefgh", 64),
+		"good.txt": "good",
+	})
+	e.put(t, "corrupt.zip", flipPayloadByte(t, archive))
 
 	snap := runRequest(t, e, "corrupt.zip", "corrupt")
-	if snap.State != StateFailed {
-		t.Fatalf("state = %s, want failed", snap.State)
+	if snap.State != StateSucceeded {
+		t.Fatalf("state = %s (%+v)", snap.State, snap.Error)
 	}
-	if snap.Error == nil || snap.Error.Status != 400 {
-		t.Fatalf("error = %+v, want a 400 failure", snap.Error)
+	if snap.SkippedInvalid != 1 || len(snap.SkippedDetails) != 1 ||
+		snap.SkippedDetails[0].Name != "data.txt" || snap.SkippedDetails[0].Reason != string(ReasonCorrupt) {
+		t.Fatalf("snapshot skips = %+v, want one corrupt skip of data.txt", snap)
 	}
-	assertNothingPublished(t, e, "corrupt")
+	if got, err := e.read(t, "corrupt/good.txt"); err != nil || string(got) != "good" {
+		t.Fatalf("good.txt = %q, %v — intact members must publish byte-identical", got, err)
+	}
+	// The unreadable member (and any partial write of it) is gone.
+	if _, err := e.read(t, "corrupt/data.txt"); err == nil {
+		t.Fatal("the corrupt member was published")
+	}
 }
 
 func TestExtractTargetExistsIsAConflict(t *testing.T) {

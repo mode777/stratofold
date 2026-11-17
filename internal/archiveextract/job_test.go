@@ -3,6 +3,7 @@ package archiveextract
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -45,6 +46,55 @@ func TestRegistryReportsProgressAndSucceeds(t *testing.T) {
 	}
 	if len(snap.ID) != 32 {
 		t.Fatalf("job id %q is not 128-bit hex", snap.ID)
+	}
+}
+
+func TestJobSkipInvalidRecordsCountSampleAndReasons(t *testing.T) {
+	reg := NewRegistry()
+	j, err := reg.Start(context.Background(), "v1", Snapshot{Path: "a.zip", Target: "a"}, "k1",
+		func(_ context.Context, j *Job) error {
+			j.setSkipped(2) // cosmetic metadata
+			for i := 0; i < maxSkipDetails+10; i++ {
+				j.skipInvalid(fmt.Sprintf("bad%d.txt", i), ReasonUnsafeName)
+			}
+			j.skipInvalid("../escape", ReasonUnsafeName)
+			j.entryDone(3)
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	snap := waitDone(t, j)
+	if snap.Skipped != 2 {
+		t.Fatalf("cosmetic skipped = %d, want 2 (kinds must stay separate)", snap.Skipped)
+	}
+	if snap.SkippedInvalid != maxSkipDetails+11 {
+		t.Fatalf("skippedInvalid = %d, want %d (count is never capped)", snap.SkippedInvalid, maxSkipDetails+11)
+	}
+	if len(snap.SkippedDetails) != maxSkipDetails {
+		t.Fatalf("sample = %d records, want the cap %d", len(snap.SkippedDetails), maxSkipDetails)
+	}
+	if snap.SkippedDetails[0].Name != "bad0.txt" || snap.SkippedDetails[0].Reason != string(ReasonUnsafeName) {
+		t.Fatalf("first detail = %+v, want bad0.txt/unsafe-name", snap.SkippedDetails[0])
+	}
+	if reason, ok := j.dominantSkip(); !ok || reason != ReasonUnsafeName {
+		t.Fatalf("dominantSkip = %q, %v, want unsafe-name", reason, ok)
+	}
+}
+
+func TestJobDominantSkipAbsentWithoutSkips(t *testing.T) {
+	reg := NewRegistry()
+	j, err := reg.Start(context.Background(), "v1", Snapshot{Path: "a.zip", Target: "a"}, "k1",
+		func(_ context.Context, j *Job) error {
+			j.setSkipped(1)
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitDone(t, j)
+	if reason, ok := j.dominantSkip(); ok {
+		t.Fatalf("dominantSkip = %q with no invalid skips", reason)
 	}
 }
 

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,7 +10,7 @@ import { CastProvider } from "../lib/cast";
 import { pb } from "../lib/pb";
 import { collectionList, installFetchMock, installPbMock, jsonResponse, type FetchRoute } from "../test/mockApi";
 import type { LsEntry } from "../lib/filesApi";
-import { uploadQueue } from "../lib/uploadQueue";
+import { uploadQueue, type UploadItem } from "../lib/uploadQueue";
 
 const sessionState = vi.hoisted(() => ({ userId: "u1", state: "authenticated" as string }));
 
@@ -554,6 +554,7 @@ describe("file management actions", () => {
     renderBrowse();
     await screen.findByTestId("entry-0");
 
+    await waitFor(() => expect(screen.getByTestId("header-actions")).toBeInTheDocument());
     const header = screen.getByTestId("header-actions").parentElement as HTMLElement;
     expect(header.className).toContain("px-4");
     expect(screen.getByTestId("header-actions").className).toContain("flex");
@@ -871,6 +872,36 @@ describe("anonymous public mode", () => {
     renderPublic("a.txt", true);
     await waitFor(() => expect(screen.getByTestId("state-unavailable")).toBeInTheDocument());
   });
+
+  it("offers no drop behavior on a public vdir", async () => {
+    installPbMock([]);
+    installFetchMock([publicMeta("pub"), lsRouter("pub", { "": SAMPLE })]);
+    const enqueue = vi.spyOn(uploadQueue, "enqueueEntries").mockImplementation(() => {});
+
+    renderPublic();
+    await screen.findByTestId("entry-0");
+    const zone = screen.getByTestId("drop-zone");
+
+    fireEvent.dragEnter(zone, { dataTransfer: { items: [], files: [] } });
+    expect(zone).not.toHaveAttribute("data-drop-active");
+
+    fireEvent.drop(zone, {
+      dataTransfer: {
+        items: [
+          {
+            webkitGetAsEntry: () => ({
+              name: "x.txt",
+              isFile: true,
+              isDirectory: false,
+              file: (ok: (file: File) => void) => ok(new File(["x"], "x.txt")),
+            }),
+          },
+        ],
+        files: [],
+      },
+    });
+    expect(enqueue).not.toHaveBeenCalled();
+  });
 });
 
 describe("archive extraction", () => {
@@ -970,5 +1001,202 @@ describe("archive extraction", () => {
     await openMenu("photos.zip");
     expect(await screen.findByTestId("context-menu")).toBeInTheDocument();
     expect(screen.queryByTestId("action-extract")).not.toBeInTheDocument();
+  });
+});
+
+describe("drag and drop uploads", () => {
+  function fileEntry(name: string): FileSystemEntry {
+    return {
+      name,
+      isFile: true,
+      isDirectory: false,
+      file: (ok: (f: File) => void) => ok(new File([name], name)),
+    } as unknown as FileSystemEntry;
+  }
+
+  function dirEntry(name: string, children: FileSystemEntry[]): FileSystemEntry {
+    return {
+      name,
+      isFile: false,
+      isDirectory: true,
+      createReader: () => {
+        let cursor = 0;
+        return {
+          readEntries: (ok: (batch: FileSystemEntry[]) => void) => {
+            const batch = children.slice(cursor, cursor + 100);
+            cursor += batch.length;
+            ok(batch);
+          },
+        };
+      },
+    } as unknown as FileSystemEntry;
+  }
+
+  function failingDirEntry(name: string): FileSystemEntry {
+    return {
+      name,
+      isFile: false,
+      isDirectory: true,
+      createReader: () => ({
+        readEntries: (_ok: unknown, fail: (error: unknown) => void) => fail(new Error("denied")),
+      }),
+    } as unknown as FileSystemEntry;
+  }
+
+  function transfer(entries: FileSystemEntry[]): DataTransfer {
+    return {
+      items: entries.map((entry) => ({ webkitGetAsEntry: () => entry, getAsFile: () => null })),
+      files: [],
+      dropEffect: "none",
+    } as unknown as DataTransfer;
+  }
+
+  async function writerOnEmptyDocs() {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    installFetchMock([lsRouter("v1", { "": SAMPLE, docs: [] })]);
+    renderBrowse("docs");
+    await screen.findByTestId("state-empty");
+    await waitFor(() => expect(screen.getByTestId("upload-button")).toBeInTheDocument());
+    return screen.getByTestId("drop-zone");
+  }
+
+  it("enqueues dropped files into the browsed directory", async () => {
+    const zone = await writerOnEmptyDocs();
+    const enqueue = vi.spyOn(uploadQueue, "enqueueEntries").mockImplementation(() => {});
+
+    fireEvent.drop(zone, { dataTransfer: transfer([fileEntry("a.txt")]) });
+
+    await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+    expect(enqueue.mock.calls[0][0]).toBe("v1");
+    expect(enqueue.mock.calls[0][1]).toEqual([
+      { kind: "upload", path: "docs/a.txt", file: expect.any(File) },
+    ]);
+  });
+
+  it("uploads a dropped folder tree with folders first", async () => {
+    const zone = await writerOnEmptyDocs();
+    const enqueue = vi.spyOn(uploadQueue, "enqueueEntries").mockImplementation(() => {});
+
+    fireEvent.drop(zone, {
+      dataTransfer: transfer([
+        dirEntry("photos", [dirEntry("sub", [fileEntry("a.jpg")]), fileEntry("b.jpg")]),
+      ]),
+    });
+
+    await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+    const entries = enqueue.mock.calls[0][1] as Array<{ kind: string; path: string }>;
+    expect(entries.map((e) => [e.kind, e.path])).toEqual([
+      ["folder", "docs/photos"],
+      ["folder", "docs/photos/sub"],
+      ["upload", "docs/photos/sub/a.jpg"],
+      ["upload", "docs/photos/b.jpg"],
+    ]);
+  });
+
+  it("marks the listing while a drag hovers and clears it on leave", async () => {
+    const zone = await writerOnEmptyDocs();
+
+    fireEvent.dragEnter(zone, { dataTransfer: transfer([fileEntry("a.txt")]) });
+    expect(zone).toHaveAttribute("data-drop-active", "true");
+
+    fireEvent.dragLeave(zone);
+    expect(zone).not.toHaveAttribute("data-drop-active");
+  });
+
+  it("shows a dismissible notice for an unreadable folder while the sibling uploads", async () => {
+    const zone = await writerOnEmptyDocs();
+    const enqueue = vi.spyOn(uploadQueue, "enqueueEntries").mockImplementation(() => {});
+
+    fireEvent.drop(zone, {
+      dataTransfer: transfer([failingDirEntry("locked"), dirEntry("open", [fileEntry("ok.txt")])]),
+    });
+
+    const notice = await screen.findByTestId("drop-notice");
+    expect(notice).toHaveTextContent("locked");
+    await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+    const entries = enqueue.mock.calls[0][1] as Array<{ kind: string; path: string }>;
+    expect(entries.map((e) => [e.kind, e.path])).toEqual([
+      ["folder", "docs/open"],
+      ["upload", "docs/open/ok.txt"],
+    ]);
+
+    await userEvent.setup().click(screen.getByTestId("drop-notice-dismiss"));
+    await waitFor(() => expect(screen.queryByTestId("drop-notice")).not.toBeInTheDocument());
+  });
+
+  it("does nothing for a drag that carries no files", async () => {
+    const zone = await writerOnEmptyDocs();
+    const enqueue = vi.spyOn(uploadQueue, "enqueueEntries").mockImplementation(() => {});
+
+    fireEvent.drop(zone, { dataTransfer: { items: [], files: [] } as unknown as DataTransfer });
+
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("drop-notice")).not.toBeInTheDocument();
+  });
+
+  it("invites writers but not viewers to drop files into an empty directory", async () => {
+    await writerOnEmptyDocs();
+    expect(within(screen.getByTestId("state-empty")).getByText(/Drop files or folders/)).toBeInTheDocument();
+  });
+
+  it("gives viewers no drop zone behavior", async () => {
+    sessionState.userId = "u2";
+    installPbMock([
+      collectionList("vdirs", [MINE]),
+      collectionList("vdir_shares", [{ id: "s1", vdir: "v1", user: "u2", role: "viewer" }]),
+    ]);
+    installFetchMock([lsRouter("v1", { "": SAMPLE, docs: [] })]);
+    const enqueue = vi.spyOn(uploadQueue, "enqueueEntries").mockImplementation(() => {});
+    renderBrowse("docs");
+    await screen.findByTestId("state-empty");
+    expect(within(screen.getByTestId("state-empty")).queryByText(/Drop files or folders/)).not.toBeInTheDocument();
+
+    const zone = screen.getByTestId("drop-zone");
+    fireEvent.dragEnter(zone, { dataTransfer: transfer([fileEntry("a.txt")]) });
+    expect(zone).not.toHaveAttribute("data-drop-active");
+    fireEvent.drop(zone, { dataTransfer: transfer([fileEntry("a.txt")]) });
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("refreshes the listing when a completed upload targets the browsed directory", async () => {
+    const listeners: Array<(item: UploadItem) => void> = [];
+    vi.spyOn(uploadQueue, "onSettled").mockImplementation((fn) => {
+      listeners.push(fn);
+      return () => {};
+    });
+    let lsCalls = 0;
+    installPbMock([collectionList("vdirs", [MINE])]);
+    installFetchMock([
+      (url, init) => {
+        if (url !== "/api/sf/vdirs/v1/ls" || init?.method !== "POST") return undefined;
+        lsCalls += 1;
+        return jsonResponse(200, { path: "", entries: SAMPLE });
+      },
+    ]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+    expect(lsCalls).toBe(1);
+
+    const item: UploadItem = {
+      id: "u1",
+      kind: "upload",
+      vdirId: "v1",
+      dir: "",
+      name: "a.txt",
+      path: "a.txt",
+      size: 1,
+      state: "completed",
+      loaded: 1,
+      total: 1,
+      attempts: 1,
+      error: null,
+      failedBy: null,
+    };
+    act(() => listeners[0](item));
+    await waitFor(() => expect(lsCalls).toBe(2));
+
+    act(() => listeners[0]({ ...item, id: "u2", dir: "docs", path: "docs/a.txt" }));
+    await waitFor(() => expect(screen.getByTestId("entry-0")).toBeInTheDocument());
+    expect(lsCalls).toBe(2);
   });
 });

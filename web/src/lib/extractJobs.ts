@@ -37,6 +37,47 @@ export function isActive(job: ExtractJob): boolean {
   return job.state === "running";
 }
 
+// skipLabels maps the server's closed reason vocabulary to short labels
+// (design D7); an unknown reason passes through untouched so the UI never
+// hides information the server reported.
+const skipLabels: Record<string, string> = {
+  "unsafe-name": "unsafe",
+  depth: "too deep",
+  symlink: "link",
+  encrypted: "encrypted",
+  "unsupported-compression": "unsupported",
+  corrupt: "corrupt",
+};
+
+export function skipLabel(reason: string): string {
+  return skipLabels[reason] ?? reason;
+}
+
+// skipSummary renders the skip split for a terminal job — "3 skipped: 1
+// invalid, 2 metadata" — or "" when nothing was skipped. Invalid skips
+// (lost content the user may care about) stay distinguishable from
+// cosmetic metadata (junk an OS added).
+export function skipSummary(job: ExtractJobJson): string {
+  const invalid = job.skippedInvalid ?? 0;
+  const cosmetic = job.skipped;
+  if (invalid === 0 && cosmetic === 0) return "";
+  if (cosmetic === 0) return `${invalid} skipped (invalid)`;
+  if (invalid === 0) return `${cosmetic} skipped (metadata)`;
+  return `${invalid + cosmetic} skipped: ${invalid} invalid, ${cosmetic} metadata`;
+}
+
+// skipNames renders the bounded sample of skipped invalid entries —
+// "../escape.txt (unsafe), secret.txt (encrypted), +9 more" — or "" when
+// the server reported none.
+export function skipNames(job: ExtractJobJson, max = 3): string {
+  const details = job.skippedDetails ?? [];
+  if (details.length === 0) return "";
+  const shown = details.slice(0, max).map((d) => `${d.name} (${skipLabel(d.reason)})`);
+  const rest = (job.skippedInvalid ?? details.length) - shown.length;
+  if (rest > 0) shown.push(`+${rest} more`);
+  return shown.join(", ");
+}
+
 // percentOf turns a job's counters into a bounded percentage: entries are
 // the unit a user understands, declared bytes are only a hint.
 export function percentOf(job: ExtractJob): number {

@@ -82,9 +82,12 @@ docker run --rm -it -v stratofold-data:/pb_data \
   beyond a bounded transfer window. In-flight extraction jobs are
   in-memory: a container restart abandons them, publishing nothing and
   leaving at most a hidden `.<archive>.sfext-<hex>` directory that the
-  next extraction in that folder sweeps. Extraction is refused for
-  archives over the configured ceilings (100,000 entries, depth 64,
-  50 GiB unpacked), symlink or encrypted entries, and traversal names
+  next extraction in that folder sweeps. Entries that cannot be
+  extracted safely — traversal or otherwise unsafe names, links,
+  encrypted members, unreadable data — are skipped and counted (the job
+  report names them); an archive from which nothing could be extracted,
+  or one over the entry and size ceilings (100,000 entries, 50 GiB
+  unpacked — entries deeper than 64 levels are skipped), fails outright
   ([archive-extraction spec](../openspec/specs/archive-extraction/spec.md)).
 - **One port for everything.** `/` (web app), `/api/*`, `/files/*`, and
   `/_/` (admin UI) are all served by the same listener — nothing needs a

@@ -38,14 +38,45 @@ type JobError struct {
 	Message string `json:"message"`
 }
 
+// SkipReason classifies why one entry was skipped as invalid (design D2's
+// closed vocabulary). The strings are API surface: they appear verbatim in
+// skip details.
+type SkipReason string
+
+const (
+	ReasonUnsafeName             SkipReason = "unsafe-name"
+	ReasonDepth                  SkipReason = "depth"
+	ReasonSymlink                SkipReason = "symlink"
+	ReasonEncrypted              SkipReason = "encrypted"
+	ReasonUnsupportedCompression SkipReason = "unsupported-compression"
+	ReasonCorrupt                SkipReason = "corrupt"
+)
+
+// SkipDetail names one skipped invalid entry and why, so a user can act
+// on what was left out of their folder.
+type SkipDetail struct {
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+}
+
+// maxSkipDetails bounds the named sample in a snapshot (design D3): the
+// count keeps the true total, a hostile archive cannot grow the JSON
+// without limit.
+const maxSkipDetails = 16
+
 // Snapshot is one observation of a job.
 type Snapshot struct {
-	ID      string `json:"id"`
-	State   State  `json:"state"`
-	Phase   Phase  `json:"phase"`
-	Path    string `json:"path"`
-	Target  string `json:"target"`
-	Skipped int    `json:"skipped"`
+	ID     string `json:"id"`
+	State  State  `json:"state"`
+	Phase  Phase  `json:"phase"`
+	Path   string `json:"path"`
+	Target string `json:"target"`
+	// Skipped counts cosmetic metadata entries (design D5 of the
+	// original change); SkippedInvalid counts entries refused as
+	// invalid — never written, never rewritten.
+	Skipped        int          `json:"skipped"`
+	SkippedInvalid int          `json:"skippedInvalid"`
+	SkippedDetails []SkipDetail `json:"skippedDetails,omitempty"`
 
 	EntriesTotal int   `json:"entriesTotal"`
 	EntriesDone  int   `json:"entriesDone"`
@@ -71,6 +102,9 @@ type Job struct {
 	mu       sync.Mutex
 	snap     Snapshot
 	finished bool
+	// reasons tallies skip reasons for the nothing-extracted guard's
+	// error message (design D5); guarded by mu.
+	reasons map[SkipReason]int
 
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -105,6 +139,36 @@ func (j *Job) setSkipped(n int) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.snap.Skipped = n
+}
+
+// skipInvalid records one entry refused as invalid (design D2/D3): the
+// count always advances, the named sample only up to its cap.
+func (j *Job) skipInvalid(name string, reason SkipReason) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.snap.SkippedInvalid++
+	if len(j.snap.SkippedDetails) < maxSkipDetails {
+		j.snap.SkippedDetails = append(j.snap.SkippedDetails, SkipDetail{Name: name, Reason: string(reason)})
+	}
+	if j.reasons == nil {
+		j.reasons = make(map[SkipReason]int, 1)
+	}
+	j.reasons[reason]++
+}
+
+// dominantSkip returns the most frequent invalid-skip reason, for the
+// nothing-extracted guard's error message (design D5).
+func (j *Job) dominantSkip() (SkipReason, bool) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	var best SkipReason
+	n := 0
+	for r, c := range j.reasons {
+		if c > n {
+			best, n = r, c
+		}
+	}
+	return best, n > 0
 }
 
 func (j *Job) entryStarted(name string) {

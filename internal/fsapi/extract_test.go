@@ -68,13 +68,18 @@ func bodyOf(t *testing.T, resp *http.Response) string {
 }
 
 type jobDoc struct {
-	ID      string `json:"id"`
-	State   string `json:"state"`
-	Phase   string `json:"phase"`
-	Path    string `json:"path"`
-	Target  string `json:"target"`
-	Skipped int    `json:"skipped"`
-	Error   *struct {
+	ID             string `json:"id"`
+	State          string `json:"state"`
+	Phase          string `json:"phase"`
+	Path           string `json:"path"`
+	Target         string `json:"target"`
+	Skipped        int    `json:"skipped"`
+	SkippedInvalid int    `json:"skippedInvalid"`
+	SkippedDetails []struct {
+		Name   string `json:"name"`
+		Reason string `json:"reason"`
+	} `json:"skippedDetails"`
+	Error *struct {
 		Status  int    `json:"status"`
 		Message string `json:"message"`
 	} `json:"error"`
@@ -247,6 +252,45 @@ func TestExtractPublishesAndIsObservable(t *testing.T) {
 	}
 }
 
+// TestExtractSkipFieldsRoundTrip pins the skip reporting through the API:
+// cosmetic and invalid skips arrive separately, and the invalid sample
+// names the entry with its reason, on the same GET the UI polls.
+func TestExtractSkipFieldsRoundTrip(t *testing.T) {
+	e := setup(t)
+	c := e.s.LoginSessionCookie(t)
+	zipBytes := makeZip(t, map[string]string{
+		"ok.txt":        "ok",
+		"../escape.txt": "hostile",
+		".DS_Store":     "junk",
+	})
+	needOK(t, uploadBytes(t, e, e.privID, "docs/mixed.zip", zipBytes, c), "seed archive")
+
+	resp, doc := postExtract(t, e, e.privID, map[string]string{"path": "docs/mixed.zip"}, c)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	j := extractJob(t, doc)
+	final := waitJob(t, e, e.privID, j.ID, c)
+	if final.State != "succeeded" {
+		t.Fatalf("state = %s (%+v)", final.State, final.Error)
+	}
+	if final.Skipped != 1 {
+		t.Fatalf("skipped = %d, want 1 cosmetic (.DS_Store)", final.Skipped)
+	}
+	if final.SkippedInvalid != 1 {
+		t.Fatalf("skippedInvalid = %d, want 1", final.SkippedInvalid)
+	}
+	if len(final.SkippedDetails) != 1 {
+		t.Fatalf("skippedDetails = %+v, want one record", final.SkippedDetails)
+	}
+	if final.SkippedDetails[0].Name != "../escape.txt" || final.SkippedDetails[0].Reason != "unsafe-name" {
+		t.Fatalf("skippedDetails[0] = %+v, want ../escape.txt/unsafe-name", final.SkippedDetails[0])
+	}
+	// The good member is published; the hostile one never landed.
+	r := opJSON(t, e, e.privID, "stat", map[string]string{"path": "docs/mixed/ok.txt"}, c)
+	needOK(t, r, "stat ok.txt")
+}
+
 func TestExtractCreationErrors(t *testing.T) {
 	e := setup(t)
 	c := e.s.LoginSessionCookie(t)
@@ -296,6 +340,53 @@ func TestExtractCreationErrors(t *testing.T) {
 			t.Fatalf("status = %d, want 404", resp.StatusCode)
 		}
 	})
+}
+
+// TestExtractAllSkippedFailsExplicitly pins the nothing-extracted guard
+// through the API: a fully encrypted archive is a 400 with skip counts,
+// not an empty published folder.
+func TestExtractAllSkippedFailsExplicitly(t *testing.T) {
+	e := setup(t)
+	c := e.s.LoginSessionCookie(t)
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	h := &zip.FileHeader{Name: "secret.txt", Method: zip.Deflate}
+	h.Flags |= 0x1 // encrypted
+	fw, err := w.CreateHeader(h)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := fw.Write([]byte("x")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	needOK(t, uploadBytes(t, e, e.privID, "docs/locked.zip", buf.Bytes(), c), "seed locked")
+
+	resp, doc := postExtract(t, e, e.privID, map[string]string{"path": "docs/locked.zip"}, c)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	j := extractJob(t, doc)
+	final := waitJob(t, e, e.privID, j.ID, c)
+	if final.State != "failed" {
+		t.Fatalf("state = %s, want failed", final.State)
+	}
+	if final.Error == nil || final.Error.Status != http.StatusBadRequest {
+		t.Fatalf("error = %+v, want 400", final.Error)
+	}
+	if !strings.Contains(final.Error.Message, "encrypted") || !strings.Contains(final.Error.Message, "nothing could be extracted") {
+		t.Fatalf("message = %q, want the nothing-extracted wording naming encryption", final.Error.Message)
+	}
+	if final.SkippedInvalid != 1 {
+		t.Fatalf("skippedInvalid = %d, want 1 reported with the failure", final.SkippedInvalid)
+	}
+	// Nothing was published.
+	r := opJSON(t, e, e.privID, "stat", map[string]string{"path": "docs/locked"}, c)
+	if r.StatusCode != http.StatusNotFound {
+		t.Fatalf("stat status = %d, want 404", r.StatusCode)
+	}
 }
 
 func TestExtractJobsAreScopedToWriters(t *testing.T) {

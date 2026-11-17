@@ -252,13 +252,23 @@ export async function mintFileLink(vdirId: string, path: string): Promise<FileLi
 export type ExtractJobState = "running" | "succeeded" | "failed" | "canceled";
 export type ExtractJobPhase = "scanning" | "extracting" | "publishing";
 
+// ExtractSkipDetail names one entry the server refused to extract as
+// invalid (traversal name, symlink, encrypted, corrupt data, …) with a
+// machine-readable reason.
+export type ExtractSkipDetail = { name: string; reason: string };
+
 export type ExtractJobJson = {
   id: string;
   state: ExtractJobState;
   phase: ExtractJobPhase;
   path: string;
   target: string;
+  /** Cosmetic metadata entries skipped (__MACOSX, .DS_Store, …). */
   skipped: number;
+  /** Entries refused as invalid — never written, never rewritten. */
+  skippedInvalid?: number;
+  /** Bounded sample of the invalid skips (count keeps the true total). */
+  skippedDetails?: ExtractSkipDetail[];
   entriesTotal: number;
   entriesDone: number;
   bytesTotal: number;

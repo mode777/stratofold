@@ -6,9 +6,10 @@
 // and the file-operation overlays. The deterministic error classes
 // render as distinct states with a retry action on 503.
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { ls, mintFileLink, type LsEntry } from "../lib/filesApi";
+import { readDrop } from "../lib/dragDrop";
 import {
   browseUrl,
   decodeSplat,
@@ -146,6 +147,66 @@ export function BrowsePage() {
     e.target.value = "";
   };
 
+  // Drag & drop (web-ui drag & drop spec, design D4): the listing is a
+  // drop zone for writers. readDrop collects the entries synchronously
+  // (the DataTransfer is invalidated once the handler returns) and
+  // resolves to a plan of folders (parents first) and files.
+  const dragDepth = useRef(0);
+  const [dropActive, setDropActive] = useState(false);
+  const [dropFailures, setDropFailures] = useState<string[]>([]);
+
+  const handleDrop = (data: DataTransfer) => {
+    if (!vdirId) return;
+    void readDrop(data).then((plan) => {
+      const entries = [
+        ...plan.folders.map((folder) => ({ kind: "folder" as const, path: joinPath(path, folder) })),
+        ...plan.files.map(({ path: relPath, file }) => ({
+          kind: "upload" as const,
+          path: joinPath(path, relPath),
+          file,
+        })),
+      ];
+      if (entries.length > 0) uploadQueue.enqueueEntries(vdirId, entries);
+      setDropFailures((prev) => (prev.length === 0 && plan.failures.length === 0 ? prev : plan.failures));
+    });
+  };
+
+  // Non-writers mount no handlers at all, so viewers and public
+  // visitors keep the browser's default drop behavior and see no
+  // drop affordance.
+  const dropHandlers = canWrite
+    ? {
+        onDragEnter: (e: DragEvent<HTMLDivElement>) => {
+          e.preventDefault();
+          dragDepth.current += 1;
+          setDropActive(true);
+        },
+        onDragOver: (e: DragEvent<HTMLDivElement>) => {
+          // The browser only fires drop when dragover is canceled.
+          e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+        },
+        onDragLeave: () => {
+          dragDepth.current = Math.max(0, dragDepth.current - 1);
+          if (dragDepth.current === 0) setDropActive(false);
+        },
+        onDrop: (e: DragEvent<HTMLDivElement>) => {
+          e.preventDefault();
+          dragDepth.current = 0;
+          setDropActive(false);
+          handleDrop(e.dataTransfer);
+        },
+      }
+    : {};
+
+  // An upload that finishes while its target directory is open refreshes
+  // the listing, so dropped or picked files appear without a reload.
+  useEffect(() => {
+    return uploadQueue.onSettled((item) => {
+      if (item.state === "completed" && item.dir === path) reload();
+    });
+  }, [path]);
+
   // An extraction that finishes while its archive's directory is open
   // refreshes the listing, so the new folder appears without a reload.
   useEffect(() => {
@@ -245,6 +306,23 @@ export function BrowsePage() {
           </div>
         )}
         <Breadcrumbs vdirId={vdirId ?? ""} vdirName={vdirName} path={path} />
+        {dropFailures.length > 0 && (
+          <div
+            role="alert"
+            data-testid="drop-notice"
+            className="mt-2 flex items-start justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+          >
+            <span>Couldn't read {dropFailures.join(", ")}. The other items still upload.</span>
+            <button
+              type="button"
+              data-testid="drop-notice-dismiss"
+              onClick={() => setDropFailures([])}
+              className="shrink-0 font-semibold text-ios-blue"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
       </div>
 
       <div
@@ -301,13 +379,21 @@ export function BrowsePage() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1">
+      <div
+        data-testid="drop-zone"
+        data-drop-active={dropActive ? "true" : undefined}
+        className={`min-h-0 flex-1 ${dropActive ? "bg-ios-blue/5 ring-2 ring-inset ring-ios-blue/60" : ""}`}
+        {...dropHandlers}
+      >
         {loading ? (
           <Spinner label="Loading directory…" />
         ) : failure ? (
           renderFailure(failure)
         ) : sorted.length === 0 ? (
-          <EmptyState title="This directory is empty" />
+          <EmptyState
+            title="This directory is empty"
+            hint={canWrite ? "Drop files or folders here to upload them." : undefined}
+          />
         ) : view === "list" ? (
           <EntryList
             entries={sorted}

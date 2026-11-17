@@ -19,6 +19,9 @@ func TestValidateEntryNameRejects(t *testing.T) {
 		{`a\b.txt`, "backslash"},
 		{"a\x00b.txt", "NUL"},
 		{"a//b.txt", "empty"},
+		{"a//", "empty"},
+		{"/", "absolute"},
+		{"//", "absolute"},
 		{"./a.txt", "dotted"},
 		{"..", "traversing"},
 		{strings.Repeat("a/", MaxDepth) + "f.txt", "levels deep"},
@@ -49,6 +52,9 @@ func TestValidateEntryNameAccepts(t *testing.T) {
 		{"docs/2026/Q1 report.pdf", []string{"docs", "2026", "Q1 report.pdf"}},
 		{"ünïcode/ß.txt", []string{"ünïcode", "ß.txt"}},
 		{"a..b/c.txt", []string{"a..b", "c.txt"}},
+		// The zip convention for directory entries: one trailing slash.
+		{"POLY_SurvivalWorkshop/", []string{"POLY_SurvivalWorkshop"}},
+		{"docs/2026/", []string{"docs", "2026"}},
 	}
 	for _, tc := range cases {
 		segs, err := ValidateEntryName(tc.name)
