@@ -80,6 +80,24 @@ shared with you under "Shared with me"; public vdirs carry a marker
   **Rename**, **Move**, and **Delete** in the context menu (delete asks
   for confirmation first). Viewers see none of these — the UI only
   offers what your role on that vdir allows.
+- To act on several entries at once, owners and editors can choose
+  **Select** in the folder header. Checkboxes appear in both list and
+  grid view; tapping an entry selects it instead of opening it, and the
+  usual long-press/ellipsis menu is paused while selecting. **Select
+  all** / **Deselect all** cover the current listing, the count updates
+  as you toggle entries, and **Done** returns to normal browsing. The
+  selection belongs to the directory you are in and is cleared when you
+  leave it.
+- With entries selected, **Move** opens the same destination picker
+  (titled with the number of items) and moves every selected entry into
+  the chosen folder; it will not accept the current directory, a
+  selected folder, or a folder inside one as the destination. **Delete**
+  asks for confirmation, names the number of entries, and warns that
+  selected folders are removed with their contents. If one entry fails,
+  the rest are still attempted: successful items are applied, failed
+  items remain, and a dismissible notice names the failures with their
+  error class. Each entry is still moved or deleted atomically; there is
+  no separate server-side batch job.
 - Instead of the picker you can **drag & drop**: drop files anywhere on
   the listing — the empty-directory state included — to upload them into
   the directory you are browsing (the listing highlights while you

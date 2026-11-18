@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowsePage } from "./BrowsePage";
 import { PreviewPage } from "./PreviewPage";
@@ -45,6 +45,7 @@ function renderBrowse(path = "") {
   return render(
     <CastProvider loadSdk={async () => null}>
       <MemoryRouter initialEntries={[`/v/v1${path ? "/" + path : ""}`]}>
+        <LocationProbe />
         <Routes>
           <Route path="/v/:vdirId/view/*" element={<PreviewPage />} />
           <Route path="/v/:vdirId/move" element={<MovePickerPage />} />
@@ -54,6 +55,11 @@ function renderBrowse(path = "") {
       </MemoryRouter>
     </CastProvider>,
   );
+}
+
+function LocationProbe() {
+  const location = useLocation();
+  return <span data-testid="location-state">{JSON.stringify(location.state)}</span>;
 }
 
 beforeEach(() => {
@@ -395,6 +401,31 @@ function opRouter(vdirId: string, calls: OpCall[]) {
   };
 }
 
+function mutableLsRouter(
+  vdirId: string,
+  root: () => LsEntry[],
+  byPath: Record<string, LsEntry[]> = {},
+): FetchRoute {
+  return (url: string, init?: RequestInit) => {
+    if (url !== `/api/sf/vdirs/${vdirId}/ls` || init?.method !== "POST") return undefined;
+    const path = JSON.parse(String(init.body)).path as string;
+    if (!path) return jsonResponse(200, { path, entries: root() });
+    const hit = byPath[path];
+    if (!hit) return jsonResponse(404, { message: "Not found." });
+    return jsonResponse(200, { path, entries: hit });
+  };
+}
+
+function deferredMvRouter(vdirId: string, calls: OpCall[], pending: Array<() => void>): FetchRoute {
+  return (url: string, init?: RequestInit) => {
+    if (url !== `/api/sf/vdirs/${vdirId}/mv` || init?.method !== "POST") return undefined;
+    calls.push({ op: "mv", body: JSON.parse(String(init.body)) as Record<string, unknown> });
+    return new Promise<Response>((resolve) => {
+      pending.push(() => resolve(new Response(null, { status: 204 })));
+    }) as unknown as Response;
+  };
+}
+
 function countingLs(vdirId: string, byPath: Record<string, LsEntry[] | Response>) {
   let count = 0;
   const route = (url: string, init?: RequestInit) => {
@@ -427,6 +458,19 @@ function rowFor(name: string): HTMLElement {
 
 async function openMenu(name: string) {
   await userEvent.setup().click(within(rowFor(name)).getByTestId("entry-actions"));
+}
+
+async function enterSelection() {
+  await waitFor(() => expect(screen.getByTestId("select-button")).toBeInTheDocument());
+  await userEvent.setup().click(screen.getByTestId("select-button"));
+  await screen.findByTestId("selection-bar");
+}
+
+async function selectEntries(...names: string[]) {
+  const user = userEvent.setup();
+  for (const name of names) {
+    await user.click(within(rowFor(name)).getByTestId("entry-select"));
+  }
 }
 
 describe("temporary links", () => {
@@ -650,6 +694,7 @@ describe("file management actions", () => {
 
     expect(screen.queryByTestId("new-folder")).not.toBeInTheDocument();
     expect(screen.queryByTestId("upload-input")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("select-button")).not.toBeInTheDocument();
     expect(screen.queryByTestId("header-actions")).not.toBeInTheDocument();
 
     await openMenu("a.txt");
@@ -669,6 +714,7 @@ describe("file management actions", () => {
     await screen.findByTestId("entry-0");
 
     await waitFor(() => expect(screen.getByTestId("new-folder")).toBeInTheDocument());
+    expect(screen.getByTestId("select-button")).toBeInTheDocument();
     await openMenu("a.txt");
     expect(within(await screen.findByTestId("context-menu")).getByTestId("action-rename")).toBeInTheDocument();
   });
@@ -688,6 +734,443 @@ describe("file management actions", () => {
     expect(enqueue.mock.calls[0][1]).toBe("docs");
     expect(enqueue.mock.calls[0][2]).toHaveLength(2);
     expect(screen.getByTestId("upload-input")).toBeInTheDocument();
+  });
+});
+
+describe("bulk selection", () => {
+  it("enters with an empty selection, disables actions, and exits with Done", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    installFetchMock([lsRouter("v1", { "": SAMPLE })]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+
+    await enterSelection();
+    expect(screen.queryByTestId("header-actions")).not.toBeInTheDocument();
+    expect(screen.getByTestId("selection-count")).toHaveTextContent("0 selected");
+    expect(screen.getByTestId("bulk-move")).toBeDisabled();
+    expect(screen.getByTestId("bulk-delete")).toBeDisabled();
+    expect(screen.getAllByTestId("entry-select")).toHaveLength(3);
+
+    await userEvent.setup().click(screen.getByTestId("selection-done"));
+    await waitFor(() => expect(screen.queryByTestId("selection-bar")).not.toBeInTheDocument());
+    expect(screen.getByTestId("select-button")).toBeInTheDocument();
+    expect(screen.queryAllByTestId("entry-select")).toHaveLength(0);
+  });
+
+  it("toggles entries from rows and checkboxes without opening them", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    installFetchMock([lsRouter("v1", { "": SAMPLE })]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+    await enterSelection();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("entry-0"));
+    expect(screen.getByTestId("selection-count")).toHaveTextContent("1 selected");
+    expect(within(screen.getByTestId("entry-0")).getByTestId("entry-select")).toBeChecked();
+    // A folder tap toggled instead of navigating.
+    expect(screen.getByTestId("breadcrumbs")).toHaveTextContent("Mine");
+
+    await user.click(within(screen.getByTestId("entry-1")).getByTestId("entry-select"));
+    expect(screen.getByTestId("selection-count")).toHaveTextContent("2 selected");
+
+    await user.click(screen.getByTestId("entry-0"));
+    expect(screen.getByTestId("selection-count")).toHaveTextContent("1 selected");
+  });
+
+  it("selects all and deselects all", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    installFetchMock([lsRouter("v1", { "": SAMPLE })]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+    await enterSelection();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("select-all-toggle"));
+    expect(screen.getByTestId("selection-count")).toHaveTextContent("3 selected");
+    expect(screen.getByTestId("select-all-toggle")).toHaveTextContent("Deselect all");
+    expect(screen.getAllByTestId("entry-select").every((box) => (box as HTMLInputElement).checked)).toBe(true);
+
+    await user.click(screen.getByTestId("select-all-toggle"));
+    expect(screen.getByTestId("selection-count")).toHaveTextContent("0 selected");
+    expect(screen.getByTestId("select-all-toggle")).toHaveTextContent("Select all");
+  });
+
+  it("keeps the selection across view and sort changes", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    installFetchMock([lsRouter("v1", { "": SAMPLE })]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+    await enterSelection();
+    await selectEntries("a.txt");
+    expect(screen.getByTestId("selection-count")).toHaveTextContent("1 selected");
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("view-grid"));
+    await waitFor(() => expect(screen.getByTestId("grid-row-0")).toBeInTheDocument());
+    expect(screen.getByTestId("selection-count")).toHaveTextContent("1 selected");
+
+    await user.selectOptions(screen.getByTestId("sort-key"), "size");
+    expect(screen.getByTestId("selection-count")).toHaveTextContent("1 selected");
+    expect(within(rowFor("a.txt")).getByTestId("entry-select")).toBeChecked();
+  });
+
+  it("clears the selection when the directory changes", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    installFetchMock([
+      lsRouter("v1", { "": SAMPLE, docs: [entry("inner.txt", { size: 1 })] }),
+    ]);
+    renderBrowse("docs");
+    await waitFor(() => expect(screen.getByTestId("entry-0")).toHaveTextContent("inner.txt"));
+    await enterSelection();
+    await selectEntries("inner.txt");
+    expect(screen.getByTestId("selection-count")).toHaveTextContent("1 selected");
+
+    await userEvent.setup().click(screen.getByTestId("back"));
+    await screen.findByTestId("entry-0");
+    expect(screen.queryByTestId("selection-bar")).not.toBeInTheDocument();
+    expect(screen.queryAllByTestId("entry-select")).toHaveLength(0);
+    expect(screen.getByTestId("select-button")).toBeInTheDocument();
+  });
+});
+
+describe("bulk delete", () => {
+  function deferredRmRouter(vdirId: string, calls: OpCall[], pending: Array<() => void>): FetchRoute {
+    return (url, init) => {
+      if (url !== `/api/sf/vdirs/${vdirId}/rm` || init?.method !== "POST") return undefined;
+      calls.push({ op: "rm", body: JSON.parse(String(init.body)) as Record<string, unknown> });
+      return new Promise<Response>((resolve) => {
+        pending.push(() => resolve(new Response(null, { status: 204 })));
+      }) as unknown as Response;
+    };
+  }
+
+  it("names the selection, warns about folders, and deletes only after confirmation", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    const calls: OpCall[] = [];
+    installFetchMock([opRouter("v1", calls), lsRouter("v1", { "": SAMPLE })]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+    await enterSelection();
+    await selectEntries("docs", "a.txt", "b.txt");
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("bulk-delete"));
+    expect(await screen.findByTestId("alert")).toHaveTextContent("Delete 3 items?");
+    expect(screen.getByTestId("alert")).toHaveTextContent(
+      "Selected folders and everything inside them will be deleted.",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(calls).toHaveLength(0);
+    expect(screen.getByTestId("selection-count")).toHaveTextContent("3 selected");
+
+    await user.click(screen.getByTestId("bulk-delete"));
+    await user.click(screen.getByTestId("bulk-delete-confirm"));
+
+    await waitFor(() => expect(calls).toHaveLength(3));
+    expect(calls.map((call) => call.body.path).sort()).toEqual(["a.txt", "b.txt", "docs"]);
+    await waitFor(() => expect(screen.queryByTestId("selection-bar")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("bulk-result")).not.toBeInTheDocument();
+  });
+
+  it("applies the successful items and reports the failed one", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    let current = [entry("a.txt"), entry("b.txt"), entry("c.txt")];
+    const calls: OpCall[] = [];
+    const ls = (url: string, init?: RequestInit) => {
+      if (url !== "/api/sf/vdirs/v1/ls" || init?.method !== "POST") return undefined;
+      return jsonResponse(200, { path: "", entries: current });
+    };
+    const rm = (url: string, init?: RequestInit) => {
+      if (url !== "/api/sf/vdirs/v1/rm" || init?.method !== "POST") return undefined;
+      const body = JSON.parse(String(init.body)) as { path: string };
+      calls.push({ op: "rm", body });
+      if (body.path === "b.txt") {
+        current = current.filter((e) => e.name === "b.txt");
+        return jsonResponse(404, { message: "Not found." });
+      }
+      current = current.filter((e) => e.name !== body.path);
+      return new Response(null, { status: 204 });
+    };
+    installFetchMock([rm, ls]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+    await enterSelection();
+    await selectEntries("a.txt", "b.txt", "c.txt");
+
+    await userEvent.setup().click(screen.getByTestId("bulk-delete"));
+    await userEvent.setup().click(screen.getByTestId("bulk-delete-confirm"));
+
+    await waitFor(() => expect(screen.getByTestId("bulk-result")).toBeInTheDocument());
+    expect(screen.getByTestId("bulk-result-summary")).toHaveTextContent(
+      "Deleted 2 of 3 items. 1 failed.",
+    );
+    expect(screen.getByTestId("bulk-result-failure")).toHaveTextContent("b.txt (not found)");
+    expect(calls).toHaveLength(3);
+
+    await waitFor(() => expect(screen.getByText("b.txt")).toBeInTheDocument());
+    expect(screen.queryByText("a.txt")).not.toBeInTheDocument();
+    expect(screen.queryByText("c.txt")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("selection-bar")).not.toBeInTheDocument();
+
+    await userEvent.setup().click(screen.getByTestId("bulk-result-dismiss"));
+    expect(screen.queryByTestId("bulk-result")).not.toBeInTheDocument();
+  });
+
+  it("shows progress, disables repeat actions, and attempts each item once", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    const calls: OpCall[] = [];
+    const pending: Array<() => void> = [];
+    installFetchMock([
+      deferredRmRouter("v1", calls, pending),
+      lsRouter("v1", { "": [entry("a.txt"), entry("b.txt")] }),
+    ]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+    await enterSelection();
+    await selectEntries("a.txt", "b.txt");
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("bulk-delete"));
+    const confirm = screen.getByTestId("bulk-delete-confirm");
+    // A double activation must not start a second batch; the lock is
+    // synchronous even before React re-renders.
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+
+    expect(calls).toHaveLength(2);
+    await waitFor(() =>
+      expect(screen.getByTestId("selection-count")).toHaveTextContent("Deleting 0 of 2"),
+    );
+    expect(screen.getByTestId("bulk-delete")).toBeDisabled();
+    expect(screen.getByTestId("bulk-move")).toBeDisabled();
+    expect(screen.getByTestId("selection-done")).toBeDisabled();
+
+    await act(async () => {
+      pending.shift()!();
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("selection-count")).toHaveTextContent("Deleting 1 of 2"),
+    );
+    expect(calls).toHaveLength(2);
+
+    await act(async () => {
+      pending.shift()!();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.queryByTestId("selection-bar")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("bulk-result")).not.toBeInTheDocument();
+  });
+});
+
+describe("bulk move", () => {
+  const MOVE_SAMPLE: LsEntry[] = [
+    entry("docs", { dir: true }),
+    entry("dest", { dir: true }),
+    entry("a.txt", { size: 10 }),
+    entry("b.txt", { size: 20 }),
+  ];
+
+  it("moves every selected entry into the chosen folder", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    let current = [...MOVE_SAMPLE];
+    const calls: OpCall[] = [];
+    const mv = (url: string, init?: RequestInit) => {
+      if (url !== "/api/sf/vdirs/v1/mv" || init?.method !== "POST") return undefined;
+      const body = JSON.parse(String(init.body)) as { path: string; to: string };
+      calls.push({ op: "mv", body });
+      current = current.filter((e) => e.name !== body.path);
+      return new Response(null, { status: 204 });
+    };
+    installFetchMock([
+      mv,
+      mutableLsRouter("v1", () => current, {
+        docs: [entry("inner", { dir: true })],
+        dest: [],
+      }),
+    ]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+    await enterSelection();
+    await selectEntries("docs", "a.txt", "b.txt");
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("bulk-move"));
+    await screen.findByTestId("move-title");
+    expect(screen.getByTestId("move-title")).toHaveTextContent("Move 3 items");
+    await user.click(screen.getByText("dest"));
+    await user.click(screen.getByTestId("move-submit"));
+
+    await waitFor(() => expect(calls).toHaveLength(3));
+    expect(calls.map((call) => call.body)).toEqual(
+      expect.arrayContaining([
+        { path: "docs", to: "dest/docs" },
+        { path: "a.txt", to: "dest/a.txt" },
+        { path: "b.txt", to: "dest/b.txt" },
+      ]),
+    );
+    await waitFor(() => expect(screen.getByTestId("entry-0")).toHaveTextContent("dest"));
+    expect(screen.queryByText("docs")).not.toBeInTheDocument();
+    expect(screen.queryByText("a.txt")).not.toBeInTheDocument();
+    expect(screen.queryByText("b.txt")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("selection-bar")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("bulk-result")).not.toBeInTheDocument();
+  });
+
+  it("shows progress and disables Back and Move Here while moving", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    const calls: OpCall[] = [];
+    const pending: Array<() => void> = [];
+    installFetchMock([
+      deferredMvRouter("v1", calls, pending),
+      mutableLsRouter("v1", () => [entry("docs", { dir: true }), entry("a.txt"), entry("b.txt")], {
+        docs: [],
+      }),
+    ]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+    await enterSelection();
+    await selectEntries("a.txt", "b.txt");
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("bulk-move"));
+    await screen.findByTestId("move-title");
+    await user.click(screen.getByText("docs"));
+    await user.click(screen.getByTestId("move-submit"));
+
+    expect(calls).toHaveLength(2);
+    await waitFor(() =>
+      expect(screen.getByTestId("move-progress")).toHaveTextContent("Moving 0 of 2"),
+    );
+    expect(screen.getByTestId("move-submit")).toBeDisabled();
+    expect(screen.getByTestId("move-cancel")).toBeDisabled();
+
+    await act(async () => {
+      pending.shift()!();
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("move-progress")).toHaveTextContent("Moving 1 of 2"),
+    );
+
+    await act(async () => {
+      pending.shift()!();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.queryByTestId("move-submit")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("bulk-result")).not.toBeInTheDocument();
+  });
+
+  it("refuses the source directory as the destination", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    installFetchMock([
+      mutableLsRouter("v1", () => MOVE_SAMPLE, { docs: [entry("inner", { dir: true })], dest: [] }),
+    ]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+    await enterSelection();
+    await selectEntries("a.txt", "b.txt");
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("bulk-move"));
+    await screen.findByTestId("move-title");
+    // The picker starts at the vdir root, which is the source directory.
+    expect(screen.getByTestId("move-submit")).toBeDisabled();
+
+    await user.click(screen.getByText("dest"));
+    expect(screen.getByTestId("move-submit")).not.toBeDisabled();
+  });
+
+  it("refuses a selected folder, its descendant, and a folded-up path", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    installFetchMock([
+      mutableLsRouter("v1", () => MOVE_SAMPLE, {
+        docs: [entry("inner", { dir: true })],
+        "docs/inner": [],
+        dest: [],
+      }),
+    ]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+    await enterSelection();
+    await selectEntries("docs");
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("bulk-move"));
+    await screen.findByTestId("move-title");
+    expect(screen.getByTestId("move-title")).toHaveTextContent("Move “docs”");
+
+    await user.click(screen.getByText("docs"));
+    expect(screen.getByTestId("move-submit")).toBeDisabled();
+    await user.click(screen.getByText("inner"));
+    expect(screen.getByTestId("move-submit")).toBeDisabled();
+
+    await user.click(screen.getByTestId("move-manual-toggle"));
+    const input = screen.getByTestId("move-manual");
+    await user.clear(input);
+    await user.type(input, "docs/../docs");
+    expect(screen.getByTestId("move-submit")).toBeDisabled();
+  });
+
+  it("cancels without moving anything", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    const calls: OpCall[] = [];
+    installFetchMock([
+      opRouter("v1", calls),
+      mutableLsRouter("v1", () => MOVE_SAMPLE, { docs: [entry("inner", { dir: true })], dest: [] }),
+    ]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+    await enterSelection();
+    await selectEntries("a.txt", "b.txt");
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("bulk-move"));
+    await screen.findByTestId("move-title");
+    await user.click(screen.getByTestId("move-cancel"));
+
+    await waitFor(() => expect(screen.getByText("docs")).toBeInTheDocument());
+    expect(calls).toHaveLength(0);
+    expect(screen.queryByTestId("selection-bar")).not.toBeInTheDocument();
+  });
+
+  it("returns partial failures to the browse view and clears the result state", async () => {
+    installPbMock([collectionList("vdirs", [MINE])]);
+    let current = [entry("docs", { dir: true }), entry("a.txt", { size: 10 }), entry("b.txt", { size: 20 })];
+    const calls: OpCall[] = [];
+    const mv = (url: string, init?: RequestInit) => {
+      if (url !== "/api/sf/vdirs/v1/mv" || init?.method !== "POST") return undefined;
+      const body = JSON.parse(String(init.body)) as { path: string; to: string };
+      calls.push({ op: "mv", body });
+      if (body.path === "b.txt") return jsonResponse(404, { message: "Not found." });
+      current = current.filter((e) => e.name !== body.path);
+      return new Response(null, { status: 204 });
+    };
+    installFetchMock([mv, mutableLsRouter("v1", () => current, { docs: [] })]);
+    renderBrowse();
+    await screen.findByTestId("entry-0");
+    await enterSelection();
+    await selectEntries("a.txt", "b.txt");
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("bulk-move"));
+    await screen.findByTestId("move-title");
+    await user.click(screen.getByText("docs"));
+    await user.click(screen.getByTestId("move-submit"));
+
+    await waitFor(() => expect(screen.getByTestId("bulk-result")).toBeInTheDocument());
+    expect(screen.getByTestId("bulk-result-summary")).toHaveTextContent(
+      "Moved 1 of 2 items. 1 failed.",
+    );
+    expect(screen.getByTestId("bulk-result-failure")).toHaveTextContent("b.txt (not found)");
+    expect(calls).toHaveLength(2);
+
+    await waitFor(() => expect(screen.getByTestId("location-state")).toHaveTextContent("null"));
+    await waitFor(() => expect(screen.getByText("b.txt")).toBeInTheDocument());
+    expect(screen.queryByText("a.txt")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("selection-bar")).not.toBeInTheDocument();
   });
 });
 
@@ -795,6 +1278,7 @@ describe("anonymous public mode", () => {
     expect(screen.queryByTestId("new-folder")).not.toBeInTheDocument();
     expect(screen.queryByTestId("upload-button")).not.toBeInTheDocument();
     expect(screen.queryByTestId("upload-input")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("select-button")).not.toBeInTheDocument();
     expect(screen.queryByTestId("header-actions")).not.toBeInTheDocument();
     expect(screen.queryByTestId("back")).not.toBeInTheDocument();
 

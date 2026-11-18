@@ -392,6 +392,26 @@ the specs and files that own each fact.
   viewer gating, permanent-failure no-retry-storm) and
   `web/e2e/drag-drop-uploads.spec.ts` (synthesized file drops; directory
   drags are unit-gated).
+- **Bulk file actions** (change `add-bulk-file-actions`): writers get a
+  **Select** control in the browse folder header; selection mode adds
+  checkboxes to list and grid rows, replaces entry taps with toggles,
+  suspends the single-entry menus, and shows a selection bar with the
+  count, Select all/Deselect all, Done, Move, and Delete. Selection is a
+  `Set<string>` of virtual paths in `BrowsePage`, clears on directory
+  change, and is pruned on reload. Bulk move reuses the pushed
+  `/v/:vdirId/move` picker with `{ entries, sourceDir }` state, validates
+  the destination against the source directory and every selected folder
+  (via `normalizeVirtualPath` in `lib/listing.ts`), and returns per-item
+  `bulkResult` navigation state; bulk delete confirms through
+  `BulkDeleteAlert` and then runs from the selection bar. Both use the
+  framework-free `web/src/lib/bulkOps.ts`: at most four concurrent
+  `mv`/`rm` calls, input-order outcomes, progress, continue-after-failure
+  except on `401`, and no client retry. Failures render in
+  `BulkResultNotice` with a bounded sample; successful items are applied
+  and failed entries remain. No server batch endpoint exists. Verification:
+  `npm --prefix web run test` (`bulkOps`, `listing`, `EntryViews`,
+  `BulkResultNotice`, and the BrowsePage selection/delete/move suites) and
+  `web/e2e/bulk-actions.spec.ts` on the verification server.
 - **Archive extraction in the SPA** (change `add-archive-extraction`):
   `.zip` entries classify as their own `archive` kind
   (`web/src/lib/entryKind.ts`) and writers get **Extract** in the

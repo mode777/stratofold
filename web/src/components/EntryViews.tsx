@@ -13,6 +13,12 @@ import { EllipsisIcon } from "./icons";
 
 export type EntryMenuRequest = (entry: LsEntry, path: string) => void;
 
+export type EntrySelectionProps = {
+  selectionMode?: boolean;
+  selected?: ReadonlySet<string>;
+  onToggle?: (path: string) => void;
+};
+
 const ROW_HEIGHT = 56;
 
 function useLongPress(onLongPress: () => void) {
@@ -108,18 +114,46 @@ function ActionsButton({ entry, onMenu }: { entry: LsEntry; onMenu: () => void }
   );
 }
 
+function SelectionCheckbox({
+  entry,
+  checked,
+  onToggle,
+}: {
+  entry: LsEntry;
+  checked: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <input
+      type="checkbox"
+      data-testid="entry-select"
+      aria-label={`Select ${entry.name}`}
+      checked={checked}
+      onChange={onToggle}
+      onClick={(e) => e.stopPropagation()}
+      className="h-5 w-5 shrink-0 accent-ios-blue"
+    />
+  );
+}
+
 export function EntryList({
   entries,
   paths,
   onOpenDir,
   onPreview,
   onMenu,
+  selectionMode = false,
+  selected,
+  onToggle,
 }: {
   entries: LsEntry[];
   paths: string[];
   onOpenDir: (path: string) => void;
   onPreview: (entry: LsEntry, path: string) => void;
   onMenu: EntryMenuRequest;
+  selectionMode?: boolean;
+  selected?: ReadonlySet<string>;
+  onToggle?: (path: string) => void;
 }) {
   const scroll = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
@@ -147,6 +181,9 @@ export function EntryList({
               onOpenDir={onOpenDir}
               onPreview={onPreview}
               onMenu={onMenu}
+              selectionMode={selectionMode}
+              selected={selected}
+              onToggle={onToggle}
               style={{
                 position: "absolute",
                 top: 0,
@@ -175,6 +212,9 @@ function EntryRow({
   onOpenDir,
   onPreview,
   onMenu,
+  selectionMode = false,
+  selected,
+  onToggle,
   style,
 }: {
   index: number;
@@ -183,9 +223,38 @@ function EntryRow({
   onOpenDir: (path: string) => void;
   onPreview: (entry: LsEntry, path: string) => void;
   onMenu: EntryMenuRequest;
+  selectionMode?: boolean;
+  selected?: ReadonlySet<string>;
+  onToggle?: (path: string) => void;
   style: React.CSSProperties;
 }) {
   const longPress = useLongPress(() => onMenu(entry, path));
+  const isSelected = selected?.has(path) ?? false;
+
+  if (selectionMode) {
+    return (
+      <div
+        data-testid={`entry-${index}`}
+        data-entry-name={entry.name}
+        data-selected={isSelected ? "true" : undefined}
+        style={style}
+        className={`flex items-center gap-3 bg-ios-card px-4 ${
+          isSelected ? "bg-ios-blue/5" : ""
+        }`}
+        onClick={() => onToggle?.(path)}
+      >
+        <SelectionCheckbox entry={entry} checked={isSelected} onToggle={() => onToggle?.(path)} />
+        <EntryIcon entry={entry} />
+        <EntryName entry={entry} />
+        {!entry.dir && (
+          <span data-testid="entry-size" className="shrink-0 text-sm font-medium text-ios-label">
+            {formatSize(entry.size)}
+          </span>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       data-testid={`entry-${index}`}
@@ -217,12 +286,18 @@ export function EntryGrid({
   onOpenDir,
   onPreview,
   onMenu,
+  selectionMode = false,
+  selected,
+  onToggle,
 }: {
   entries: LsEntry[];
   paths: string[];
   onOpenDir: (path: string) => void;
   onPreview: (entry: LsEntry, path: string) => void;
   onMenu: EntryMenuRequest;
+  selectionMode?: boolean;
+  selected?: ReadonlySet<string>;
+  onToggle?: (path: string) => void;
 }) {
   const scroll = useRef<HTMLDivElement>(null);
   const rowCount = Math.ceil(entries.length / GRID_COLUMNS);
@@ -265,6 +340,9 @@ export function EntryGrid({
                     onOpenDir={onOpenDir}
                     onPreview={onPreview}
                     onMenu={onMenu}
+                    selectionMode={selectionMode}
+                    selected={selected}
+                    onToggle={onToggle}
                   />
                 );
               })}
@@ -285,6 +363,9 @@ function GridCell({
   onOpenDir,
   onPreview,
   onMenu,
+  selectionMode = false,
+  selected,
+  onToggle,
 }: {
   index: number;
   entry: LsEntry;
@@ -292,8 +373,12 @@ function GridCell({
   onOpenDir: (path: string) => void;
   onPreview: (entry: LsEntry, path: string) => void;
   onMenu: EntryMenuRequest;
+  selectionMode?: boolean;
+  selected?: ReadonlySet<string>;
+  onToggle?: (path: string) => void;
 }) {
   const longPress = useLongPress(() => onMenu(entry, path));
+  const isSelected = selected?.has(path) ?? false;
   const targetCls = "flex w-full flex-1 flex-col items-center justify-center gap-2 text-center";
   const body = (
     <>
@@ -301,6 +386,26 @@ function GridCell({
       <span className="line-clamp-2 text-xs font-semibold text-ios-label">{entry.name}</span>
     </>
   );
+
+  if (selectionMode) {
+    return (
+      <div
+        data-testid={`entry-${index}`}
+        data-entry-name={entry.name}
+        data-selected={isSelected ? "true" : undefined}
+        className={`relative flex aspect-square flex-col items-center justify-center rounded-xl border bg-ios-card p-3 shadow-sm active:scale-95 ${
+          isSelected ? "border-ios-blue bg-ios-blue/5 ring-2 ring-ios-blue/40" : "border-black/5"
+        }`}
+        onClick={() => onToggle?.(path)}
+      >
+        <div className="absolute top-2 left-2">
+          <SelectionCheckbox entry={entry} checked={isSelected} onToggle={() => onToggle?.(path)} />
+        </div>
+        <div className={targetCls}>{body}</div>
+      </div>
+    );
+  }
+
   return (
     <div
       data-testid={`entry-${index}`}

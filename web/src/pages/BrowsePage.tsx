@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { ls, mintFileLink, type LsEntry } from "../lib/filesApi";
+import { bulkDelete, type BulkOutcome } from "../lib/bulkOps";
 import { readDrop } from "../lib/dragDrop";
 import {
   browseUrl,
@@ -26,12 +27,27 @@ import { extractJobs } from "../lib/extractJobs";
 import { useSession } from "../lib/session";
 import { useVdirRole } from "../lib/useVdirRole";
 import { Breadcrumbs } from "../components/Breadcrumbs";
+import { BulkResultNotice } from "../components/BulkResultNotice";
 import { ContextMenu } from "../components/ContextMenu";
-import { DeleteAlert, ExtractSheet, MkdirSheet, RenameSheet } from "../components/FileOpsDialogs";
+import {
+  BulkDeleteAlert,
+  DeleteAlert,
+  ExtractSheet,
+  MkdirSheet,
+  RenameSheet,
+} from "../components/FileOpsDialogs";
 import { EmptyState, FailureState, Spinner, UnavailableState } from "../components/Errors";
 import { usePublicBrowseName } from "../components/PublicGate";
 import { EntryGrid, EntryList } from "../components/EntryViews";
-import { ChevronLeftIcon, FolderPlusIcon, GridIcon, ListIcon, SortIcon, UploadIcon } from "../components/icons";
+import {
+  CheckIcon,
+  ChevronLeftIcon,
+  FolderPlusIcon,
+  GridIcon,
+  ListIcon,
+  SortIcon,
+  UploadIcon,
+} from "../components/icons";
 import type { ApiFailure } from "../lib/filesApi";
 
 type ViewMode = "list" | "grid";
@@ -42,13 +58,16 @@ type FileOp =
 
 type MenuState = { entry: LsEntry; path: string };
 
+type BulkNotice = { action: "move" | "delete"; outcomes: BulkOutcome[] };
+
 function loadView(): ViewMode {
   return localStorage.getItem("sf.view") === "grid" ? "grid" : "list";
 }
 
 export function BrowsePage() {
   const { vdirId } = useParams();
-  const { pathname } = useLocation();
+  const location = useLocation();
+  const { pathname } = location;
   const navigate = useNavigate();
   const path = useMemo(() => {
     const prefix = `/v/${vdirId}`;
@@ -68,6 +87,14 @@ export function BrowsePage() {
   const [vdir, setVdir] = useState<VdirRecord | null>(null);
   const [op, setOp] = useState<FileOp | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
+
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [bulkAlert, setBulkAlert] = useState(false);
+  const [bulkRunning, setBulkRunning] = useState<{ processed: number; total: number } | null>(null);
+  const [bulkNotice, setBulkNotice] = useState<BulkNotice | null>(null);
+  const bulkLock = useRef(false);
+
   const { canWrite } = useVdirRole(vdir);
   // Public mode (design D3): the anonymous browse view takes the
   // vdir's name from the meta probe, skips the authenticated record
@@ -127,6 +154,70 @@ export function BrowsePage() {
   const sorted = useMemo(() => sortEntries(entries, sortKey, sortDir), [entries, sortKey, sortDir]);
   const paths = useMemo(() => sorted.map((e) => joinPath(path, e.name)), [sorted, path]);
 
+  const selectedItems = useMemo(
+    () =>
+      sorted.flatMap((entry, i) =>
+        selected.has(paths[i]) ? [{ entry, path: paths[i] }] : [],
+      ),
+    [sorted, paths, selected],
+  );
+  const allSelected = paths.length > 0 && paths.every((p) => selected.has(p));
+
+  // Selection belongs to the directory being browsed (design D2):
+  // navigating away ends it, and a reload drops paths that no longer
+  // exist while keeping the rest across sort/view changes.
+  useEffect(() => {
+    setSelectMode(false);
+    setSelected(new Set());
+    setBulkNotice(null);
+  }, [path]);
+
+  const pathSet = useMemo(() => new Set(paths), [paths]);
+  useEffect(() => {
+    if (!selectMode) return;
+    setSelected((prev) => {
+      const next = new Set([...prev].filter((p) => pathSet.has(p)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [pathSet, selectMode]);
+
+  // A bulk move returns to this directory with its per-item outcomes
+  // (design D6). Show them once, then replace the history entry with a
+  // state-free navigation so reload/back does not replay the notice.
+  useEffect(() => {
+    const state = location.state as { bulkResult?: BulkOutcome[]; bulkAction?: "move" | "delete" } | null;
+    if (!state?.bulkResult) return;
+    setBulkNotice({ action: state.bulkAction ?? "move", outcomes: state.bulkResult });
+    setSelectMode(false);
+    setSelected(new Set());
+    void navigate(pathname, { replace: true, state: null });
+  }, [location.state, navigate, pathname]);
+
+  const startSelect = () => {
+    setMenu(null);
+    setSelectMode(true);
+    setSelected(new Set());
+  };
+
+  const endSelect = () => {
+    if (bulkRunning) return;
+    setSelectMode(false);
+    setSelected(new Set());
+  };
+
+  const toggleSelected = (entryPath: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(entryPath)) next.delete(entryPath);
+      else next.add(entryPath);
+      return next;
+    });
+  };
+
+  const toggleAllSelected = () => {
+    setSelected(allSelected ? new Set() : new Set(paths));
+  };
+
   const switchView = (mode: ViewMode) => {
     setView(mode);
     localStorage.setItem("sf.view", mode);
@@ -136,6 +227,43 @@ export function BrowsePage() {
   const finishOp = () => {
     setOp(null);
     reload();
+  };
+
+  const startBulkDelete = () => {
+    if (!vdirId || selectedItems.length === 0 || bulkRunning || bulkLock.current) return;
+    setMenu(null);
+    setBulkAlert(true);
+  };
+
+  // Confirming closes the alert before the batch starts (design D7), so
+  // the selection bar stays visible with disabled controls and progress.
+  const runBulkDelete = async () => {
+    if (!vdirId || selectedItems.length === 0 || bulkLock.current) return;
+    const items = selectedItems.map(({ entry, path }) => ({ name: entry.name, path }));
+    bulkLock.current = true;
+    setBulkAlert(false);
+    setBulkNotice(null);
+    setBulkRunning({ processed: 0, total: items.length });
+    try {
+      const outcomes = await bulkDelete(vdirId, items, {
+        onProgress: (processed, total) => setBulkRunning({ processed, total }),
+      });
+      setBulkNotice({ action: "delete", outcomes });
+      setSelectMode(false);
+      setSelected(new Set());
+      reload();
+    } finally {
+      bulkLock.current = false;
+      setBulkRunning(null);
+    }
+  };
+
+  const startBulkMove = () => {
+    if (!vdirId || selectedItems.length === 0 || bulkRunning || bulkLock.current) return;
+    setMenu(null);
+    void navigate(`/v/${vdirId}/move`, {
+      state: { entries: selectedItems, sourceDir: path },
+    });
   };
 
   const uploadInput = useRef<HTMLInputElement>(null);
@@ -221,7 +349,9 @@ export function BrowsePage() {
     void navigate(previewUrl(vdirId ?? "", entryPath));
   const startMove = (entry: LsEntry, entryPath: string) => {
     setMenu(null);
-    void navigate(`/v/${vdirId}/move`, { state: { entry, path: entryPath } });
+    void navigate(`/v/${vdirId}/move`, {
+      state: { entries: [{ entry, path: entryPath }], sourceDir: path },
+    });
   };
 
   // Mint then copy, returning whether the clipboard now holds the
@@ -276,8 +406,8 @@ export function BrowsePage() {
         </h1>
         {/* Write actions live in the folder header (design D3) so the
             compact toolbar below stays view-controls-only and fits at
-            mobile widths. */}
-        {canWrite && (
+            mobile widths. Selection mode replaces them with its bar. */}
+        {canWrite && !selectMode && (
           <div className="mt-2 flex items-center gap-2" data-testid="header-actions">
             <button
               type="button"
@@ -295,6 +425,14 @@ export function BrowsePage() {
             >
               <UploadIcon /> Upload
             </button>
+            <button
+              type="button"
+              data-testid="select-button"
+              onClick={startSelect}
+              className="flex items-center gap-1 rounded-full border border-ios-separator bg-ios-card px-2.5 py-1.5 font-medium text-ios-label shadow-sm"
+            >
+              <CheckIcon className="text-ios-blue" /> Select
+            </button>
             <input
               ref={uploadInput}
               type="file"
@@ -303,6 +441,61 @@ export function BrowsePage() {
               onChange={onUpload}
               className="hidden"
             />
+          </div>
+        )}
+        {canWrite && selectMode && (
+          <div className="mt-2 flex flex-col gap-2" data-testid="selection-bar">
+            <div className="flex items-center justify-between gap-2">
+              <span
+                data-testid="selection-count"
+                aria-live="polite"
+                className="text-sm font-semibold text-ios-label"
+              >
+                {bulkRunning
+                  ? `Deleting ${bulkRunning.processed} of ${bulkRunning.total}…`
+                  : `${selectedItems.length} selected`}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  data-testid="select-all-toggle"
+                  disabled={bulkRunning !== null || paths.length === 0}
+                  onClick={toggleAllSelected}
+                  className="rounded-full border border-ios-separator bg-ios-card px-2.5 py-1.5 font-medium text-ios-label shadow-sm disabled:opacity-40"
+                >
+                  {allSelected ? "Deselect all" : "Select all"}
+                </button>
+                <button
+                  type="button"
+                  data-testid="selection-done"
+                  disabled={bulkRunning !== null}
+                  onClick={endSelect}
+                  className="rounded-full bg-ios-blue px-3 py-1.5 font-medium text-white shadow-sm disabled:opacity-40"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                data-testid="bulk-move"
+                disabled={selectedItems.length === 0 || bulkRunning !== null}
+                onClick={startBulkMove}
+                className="flex-1 rounded-full border border-ios-separator bg-ios-card px-3 py-1.5 font-medium text-ios-label shadow-sm disabled:opacity-40"
+              >
+                Move
+              </button>
+              <button
+                type="button"
+                data-testid="bulk-delete"
+                disabled={selectedItems.length === 0 || bulkRunning !== null}
+                onClick={startBulkDelete}
+                className="flex-1 rounded-full bg-ios-red px-3 py-1.5 font-medium text-white shadow-sm disabled:opacity-40"
+              >
+                Delete
+              </button>
+            </div>
           </div>
         )}
         <Breadcrumbs vdirId={vdirId ?? ""} vdirName={vdirName} path={path} />
@@ -324,6 +517,14 @@ export function BrowsePage() {
           </div>
         )}
       </div>
+
+      {bulkNotice && (
+        <BulkResultNotice
+          action={bulkNotice.action}
+          outcomes={bulkNotice.outcomes}
+          onDismiss={() => setBulkNotice(null)}
+        />
+      )}
 
       <div
         className="flex items-center gap-2 border-y border-ios-separator bg-ios-bg px-4 py-2 text-xs"
@@ -401,6 +602,9 @@ export function BrowsePage() {
             onOpenDir={openDir}
             onPreview={openPreview}
             onMenu={(entry, entryPath) => setMenu({ entry, path: entryPath })}
+            selectionMode={selectMode}
+            selected={selected}
+            onToggle={toggleSelected}
           />
         ) : (
           <EntryGrid
@@ -409,6 +613,9 @@ export function BrowsePage() {
             onOpenDir={openDir}
             onPreview={openPreview}
             onMenu={(entry, entryPath) => setMenu({ entry, path: entryPath })}
+            selectionMode={selectMode}
+            selected={selected}
+            onToggle={toggleSelected}
           />
         )}
       </div>
@@ -475,6 +682,14 @@ export function BrowsePage() {
           path={op.path}
           onClose={() => setOp(null)}
           onDone={finishOp}
+        />
+      )}
+      {bulkAlert && (
+        <BulkDeleteAlert
+          count={selectedItems.length}
+          hasFolders={selectedItems.some((item) => item.entry.dir)}
+          onClose={() => setBulkAlert(false)}
+          onConfirm={() => void runBulkDelete()}
         />
       )}
     </div>

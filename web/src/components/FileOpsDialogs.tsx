@@ -269,6 +269,39 @@ export function DeleteAlert({
   );
 }
 
+// BulkDeleteAlert confirms a selection delete (design D7): it names the
+// count and warns that selected folders lose their contents. The actual
+// batch runs after the alert closes, so the selection bar can show
+// progress instead of a modal staying up for the whole operation.
+export function BulkDeleteAlert({
+  count,
+  hasFolders,
+  onClose,
+  onConfirm,
+}: {
+  count: number;
+  hasFolders: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Alert
+      title={`Delete ${count} ${count === 1 ? "item" : "items"}?`}
+      message={
+        <>
+          {hasFolders ? "Selected folders and everything inside them will be deleted. " : ""}
+          This cannot be undone.
+        </>
+      }
+      confirmLabel="Delete"
+      destructive
+      onCancel={onClose}
+      onConfirm={onConfirm}
+      confirmTestid="bulk-delete-confirm"
+    />
+  );
+}
+
 // ExtractSheet confirms an archive extraction (archive-extraction spec):
 // it names the derived folder, lets the user change it, and turns a 409
 // conflict into an alternative-name prompt instead of a dead end.

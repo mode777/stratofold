@@ -68,6 +68,26 @@ export function joinPath(path: string, name: string): string {
   return path ? `${path}/${name}` : name;
 }
 
+// normalizeVirtualPath folds "." and ".." segments into a canonical
+// relative virtual path. It returns null when the input escapes above
+// the vdir root instead of clamping, so a manual move destination such
+// as "../docs" is refused rather than silently reinterpreted. The vdir
+// sandbox remains the security boundary; this only keeps the move
+// picker's destination comparisons honest.
+export function normalizeVirtualPath(input: string): string | null {
+  const out: string[] = [];
+  for (const segment of input.split("/")) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") {
+      if (out.length === 0) return null;
+      out.pop();
+      continue;
+    }
+    out.push(segment);
+  }
+  return out.join("/");
+}
+
 // parentPath returns the containing virtual path ("" for the root).
 export function parentPath(path: string): string {
   const idx = path.lastIndexOf("/");

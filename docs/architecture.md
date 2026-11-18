@@ -299,7 +299,11 @@ Shipped screens and routes:
   name/size/modified, virtualized rendering (TanStack Virtual) for
   large directories, per-entry download links and media new-tab links,
   plus write actions gated by the user's role on the vdir (owner or
-  `editor`): new folder, rename, move, delete, and multi-file upload.
+  `editor`): new folder, rename, move, delete, multi-file upload, and a
+  writer-only selection mode with bulk move/delete. Bulk actions fan out
+  over the same per-item `mv`/`rm` operations with bounded concurrency
+  (`web/src/lib/bulkOps.ts`); there is no server-side batch endpoint, and
+  per-item failures are reported while the rest apply.
 - `/connections`, `/vdirs` — create/edit/delete the user's own
   connections and vdirs over the record API; secrets are write-only
   (never returned by the server, empty on edit = unchanged); the host-key
