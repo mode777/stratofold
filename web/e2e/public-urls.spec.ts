@@ -10,10 +10,18 @@ import { OWNER, login, nav } from "./helpers";
 
 const SLUG = "my-public-folder";
 
+// vdirRow matches the row whose name is exactly <name>; plain hasText
+// also matches a different vdir's root path (e.g. "/home/").
+function vdirRow(page: Page, name: string) {
+  return page
+    .getByTestId("vdir-row")
+    .filter({ has: page.getByText(name, { exact: true }) });
+}
+
 async function openVdirSharing(page: Page, name: string) {
   await nav(page, "settings");
   await page.getByTestId("settings-vdirs").click();
-  await page.getByTestId("vdir-row").filter({ hasText: name }).click();
+  await vdirRow(page, name).click();
   await page.getByTestId("vdir-sharing").click();
   await expect(page.getByTestId("sharing-page")).toBeVisible();
 }
@@ -124,7 +132,7 @@ test.describe.serial("pretty public URLs", () => {
     await expect(anonPage.getByLabel("Email")).toHaveCount(0);
 
     // Re-publish: the reserved name becomes active again.
-    await page.getByTestId("vdir-row").filter({ hasText: "Public" }).click();
+    await vdirRow(page, "Public").click();
     await page.getByTestId("v-public").check({ force: true });
     await page.getByTestId("vdir-save").click();
     await expect(page.getByTestId("vdirs-page")).toBeVisible();
