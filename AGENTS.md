@@ -95,19 +95,22 @@ the specs and files that own each fact.
   in-proc stack; against a manually-run server, point the script at it
   with `SF_BASE_URL SF_EMAIL SF_PASSWORD SF_VDIR_ID SF_PUB_VDIR_ID`
   (a public and a private vdir over the seeded dataset).
-- **Pretty public URLs** (change `add-pretty-public-urls`): a vdir's
-  optional `public_slug` (2–63 lowercase letters/digits/hyphens, globally
-  unique via a partial unique index) additionally serves the read-only
-  public surface at `/apps/<name>` while `is_public` is true. Slashed
-  alias paths and the root-level `view` namespace return the SPA shell
-  with no SSH dial; an unslashed file path streams through the
-  `fileserver` sandbox/`ServeFile` path, an unslashed directory redirects
-  to its slashed form, and missing/private/released names are the same
-  `404` (no dial, no session or token consulted). The session-free
-  resolver is `GET /api/sf/public-urls/<name>`; `/apps` is a reserved
-  SPA prefix. The sharing screen claims/changes/releases the name, and
-  public link/copy actions prefer `/apps/<name>`. A root-level `view`
-  directory is shadowed on the alias (use `/files`). Verification:
+- **Pretty public URLs** (changes `add-pretty-public-urls` and
+  `serve-index-html-on-public-urls`): a vdir's optional `public_slug`
+  (2–63 lowercase letters/digits/hyphens, globally unique via a partial
+  unique index) additionally serves the read-only public surface at
+  `/apps/<name>` while `is_public` is true. A slashed alias directory URL
+  serves `<dir>/index.html` when the sandbox finds it (one stat, then the
+  `fileserver` Range/conditional/ETag/HEAD path) and otherwise returns
+  the SPA browse shell; the root-level `view` namespace stays the preview
+  shell. An unslashed file path streams through `fileserver`, an
+  unslashed directory redirects to its slashed form, and
+  missing/private/released names are the same `404` (no dial, no session
+  or token consulted). The session-free resolver is
+  `GET /api/sf/public-urls/<name>`; `/apps` is a reserved SPA prefix. The
+  sharing screen claims/changes/releases the name, and public link/copy
+  actions prefer `/apps/<name>`. A root-level `view` directory is
+  shadowed on the alias (use `/files`). Verification:
   `go test ./internal/publicurls/ ./internal/migrations/
   ./internal/appserver/`, `npm --prefix web run test`, and
   `web/e2e/public-urls.spec.ts` on the verification server.

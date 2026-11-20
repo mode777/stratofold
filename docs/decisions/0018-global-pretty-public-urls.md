@@ -1,6 +1,7 @@
 # 0018 — Global pretty public URLs for vdirs
 
-Status: Accepted (2026-11, change `add-pretty-public-urls`)
+Status: Superseded by [0019](0019-index-documents-on-public-urls.md)
+(2026-11, change `add-pretty-public-urls`)
 
 ## Context
 

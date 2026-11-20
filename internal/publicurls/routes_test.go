@@ -92,7 +92,9 @@ func newAliasEnv(t *testing.T) *aliasEnv {
 	writeFile(t, scl, f.Path("sandbox/index.html"), "<h1>root index</h1>\n")
 	writeFile(t, scl, f.Path("sandbox/docs/a.txt"), aliasDocsText)
 	writeFile(t, scl, f.Path("sandbox/docs/ten.txt"), aliasTenBytes)
+	writeFile(t, scl, f.Path("sandbox/docs/sub/index.html"), "<h1>sub index</h1>\n")
 	writeFile(t, scl, f.Path("sandbox/view/photo.jpg"), "view bytes")
+	writeFile(t, scl, f.Path("sandbox/view/index.html"), "<h1>view index</h1>\n")
 	writeFile(t, scl, f.Path("sandbox/docs/view/photo.jpg"), "nested view bytes")
 	writeFile(t, scl, f.Path("outside/secret.txt"), "outside secret\n")
 	if err := scl.Symlink(f.Path("outside"), f.Path("sandbox/docs/link-out")); err != nil {
@@ -163,39 +165,42 @@ func TestAliasBrowseRoutes(t *testing.T) {
 		}
 	})
 
-	t.Run("root and nested slashed paths serve the shell", func(t *testing.T) {
-		for _, path := range []string{"/apps/pretty/", "/apps/pretty/docs/", "/apps/pretty/docs/sub/"} {
-			resp := doAlias(t, http.MethodGet, e.s.BaseURL+path, nil, nil)
-			body := readAll(t, resp)
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("%s: status %d, want 200", path, resp.StatusCode)
-			}
-			if !bytes.Contains(body, []byte(aliasShell)) {
-				t.Fatalf("%s did not return the SPA shell: %.100s", path, body)
-			}
-		}
-	})
-
-	t.Run("slashed paths do not dial", func(t *testing.T) {
-		before := e.f.TotalConns()
-		resp := doAlias(t, http.MethodGet, e.s.BaseURL+"/apps/pretty/unrelated/", nil, nil)
-		_ = readAll(t, resp)
+	t.Run("folders without an index serve the shell", func(t *testing.T) {
+		resp := doAlias(t, http.MethodGet, e.s.BaseURL+"/apps/pretty/docs/", nil, nil)
+		body := readAll(t, resp)
 		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("missing slashed path: status %d, want 200 shell", resp.StatusCode)
+			t.Fatalf("status %d, want 200", resp.StatusCode)
 		}
-		if after := e.f.TotalConns(); after != before {
-			t.Fatalf("browse shell dialed SSH: conns %d -> %d", before, after)
+		if !bytes.Contains(body, []byte(aliasShell)) {
+			t.Fatalf("docs/ did not return the SPA shell: %.100s", body)
 		}
 	})
 
-	t.Run("directories never resolve index.html", func(t *testing.T) {
+	t.Run("root index is served", func(t *testing.T) {
 		resp := doAlias(t, http.MethodGet, e.s.BaseURL+"/apps/pretty/", nil, nil)
 		body := readAll(t, resp)
-		if bytes.Contains(body, []byte("root index")) {
-			t.Fatal("slashed root served index.html instead of the browse shell")
+		if resp.StatusCode != http.StatusOK || string(body) != "<h1>root index</h1>\n" {
+			t.Fatalf("root index: status %d body %q", resp.StatusCode, body)
 		}
-		resp = doAlias(t, http.MethodGet, e.s.BaseURL+"/apps/pretty/index.html", nil, nil)
-		body = readAll(t, resp)
+		if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+			t.Fatalf("root index Content-Type = %q, want text/html", ct)
+		}
+		if resp.Header.Get("ETag") == "" {
+			t.Fatal("root index has no ETag")
+		}
+	})
+
+	t.Run("nested index is served", func(t *testing.T) {
+		resp := doAlias(t, http.MethodGet, e.s.BaseURL+"/apps/pretty/docs/sub/", nil, nil)
+		body := readAll(t, resp)
+		if resp.StatusCode != http.StatusOK || string(body) != "<h1>sub index</h1>\n" {
+			t.Fatalf("nested index: status %d body %q", resp.StatusCode, body)
+		}
+	})
+
+	t.Run("explicit index path streams the same file", func(t *testing.T) {
+		resp := doAlias(t, http.MethodGet, e.s.BaseURL+"/apps/pretty/index.html", nil, nil)
+		body := readAll(t, resp)
 		if resp.StatusCode != http.StatusOK || string(body) != "<h1>root index</h1>\n" {
 			t.Fatalf("explicit index.html: status %d body %q", resp.StatusCode, body)
 		}
@@ -219,8 +224,8 @@ func TestAliasBrowseRoutes(t *testing.T) {
 			if resp.StatusCode != http.StatusOK || !bytes.Contains(body, []byte(aliasShell)) {
 				t.Fatalf("%s: status %d body %.80s, want the shell", path, resp.StatusCode, body)
 			}
-			if bytes.Contains(body, []byte("view bytes")) {
-				t.Fatalf("%s streamed a root-level view file instead of the shell", path)
+			if bytes.Contains(body, []byte("view bytes")) || bytes.Contains(body, []byte("view index")) {
+				t.Fatalf("%s streamed a root-level view entry instead of the preview shell", path)
 			}
 		}
 	})
@@ -275,7 +280,7 @@ func TestAliasBrowseRoutes(t *testing.T) {
 		}
 		resp = doAlias(t, http.MethodGet, e.s.BaseURL+"/apps/pretty/", nil, nil)
 		body := readAll(t, resp)
-		if resp.StatusCode != http.StatusOK || !bytes.Contains(body, []byte(aliasShell)) {
+		if resp.StatusCode != http.StatusOK || string(body) != "<h1>root index</h1>\n" {
 			t.Fatalf("republished alias: status %d body %.80s", resp.StatusCode, body)
 		}
 	})
@@ -449,7 +454,7 @@ func TestAliasResolverAndLifecycle(t *testing.T) {
 		}
 		resp := doAlias(t, http.MethodGet, e.s.BaseURL+"/apps/renamed/", nil, nil)
 		body := readAll(t, resp)
-		if resp.StatusCode != http.StatusOK || !bytes.Contains(body, []byte(aliasShell)) {
+		if resp.StatusCode != http.StatusOK || string(body) != "<h1>root index</h1>\n" {
 			t.Fatalf("new name: status %d body %.80s", resp.StatusCode, body)
 		}
 

@@ -107,14 +107,16 @@ docker run --rm -it -v stratofold-data:/pb_data \
   playback work. Links are fixed at 24 hours; there is no server setting
   to change that today.
 - **Pretty public URLs.** `/apps/<name>` is an additional read-only
-  surface for a public vdir: it renders the public browse view and
-  streams direct file paths with the same Range/conditional/resume
-  behavior as `/files/`, so the same proxy-buffering and `Range` notes
-  apply. Access needs no authentication and no extra upstream; unknown,
-  released, and non-public names are a plain `404`. Public names are
-  globally unique per instance and appear in reverse-proxy access logs
-  like any other path. A name is registration metadata only — it never
-  publishes a private vdir and never carries a token.
+  surface for a public vdir. Directory URLs serve the folder's
+  `index.html` when it exists (like a static host) and otherwise render
+  the public browse view; index and direct-file responses use the same
+  Range/conditional/resume behavior as `/files/`, so the same
+  proxy-buffering and `Range` notes apply. Access needs no
+  authentication and no extra upstream; unknown, released, and
+  non-public names are a plain `404`. Public names are globally unique
+  per instance and appear in reverse-proxy access logs like any other
+  path. A name is registration metadata only — it never publishes a
+  private vdir and never carries a token.
 - **API access tokens.** **Settings → Connected apps** mints
   vdir-scoped bearer tokens for scripts and third-party apps. The
   plaintext is shown once and stored only as a SHA-256 hash; revoking it

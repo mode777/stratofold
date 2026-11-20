@@ -290,12 +290,14 @@ says so explicitly.
   later owner can claim it and old links can point at different content;
   register deliberately and keep the vdir public for as long as the link
   matters.
-- **Direct file links.** `/apps/<name>/docs/report.pdf` streams the file
-  with the same Range, cache-validator, and resume behavior as `/files`.
-  A directory path (with a trailing slash) shows the browse view; a
-  directory without the slash redirects to it. Directories never fall
-  back to an `index.html` — link `/apps/<name>/index.html` explicitly
-  for that file.
+- **Direct file links and static entry points.** `/apps/<name>/docs/report.pdf`
+  streams the file with the same Range, cache-validator, and resume
+  behavior as `/files`. A directory URL (with a trailing slash) serves
+  its `index.html` when one exists, so a published app or site works at
+  `/apps/<name>/` and `/apps/<name>/docs/`; a directory without an index
+  shows the read-only browse view instead. A directory without the
+  trailing slash redirects to the slashed form. The index convention is
+  `index.html` only.
 - **The `view` name is reserved at the folder root.** The in-app preview
   uses `/apps/<name>/view/…`, so a remote folder literally named `view`
   at the vdir root is reachable only through

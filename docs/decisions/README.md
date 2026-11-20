@@ -27,7 +27,8 @@ directory holds only what stays true after a change is archived.
 | 0015 | Accepted | Content versions from publication generations plus remote signatures |
 | 0016 | Accepted | App connection strings are opaque prefixed values |
 | 0017 | Accepted | Long-running operations are in-memory jobs polled over the API |
-| 0018 | Accepted | Global pretty public URLs for vdirs under `/apps/<name>` |
+| 0018 | Superseded by 0019 | Global pretty public URLs for vdirs under `/apps/<name>` |
+| 0019 | Accepted | Alias directory URLs serve `index.html` when present |
 
 ## Adding a decision
 

@@ -72,20 +72,24 @@ test.describe.serial("pretty public URLs", () => {
     const anon = await browser.newContext();
     const page = await anon.newPage();
 
-    await page.goto(`/apps/${SLUG}`);
-    await expect(page.getByTestId("breadcrumbs")).toContainText("Public");
-    await expect(page.getByText("hello.txt")).toBeVisible();
+    // The seeded root contains index.html: the static document takes
+    // precedence over the browse view at the alias root.
+    const root = await page.goto(`/apps/${SLUG}`);
+    expect(root?.status()).toBe(200);
+    await expect(page.getByText("stratofold hosting")).toBeVisible();
+    await expect(page.getByTestId("breadcrumbs")).toHaveCount(0);
     await expect(page.getByLabel("Email")).toHaveCount(0);
     await expect(page.getByTestId("tab-bar")).toHaveCount(0);
+
+    // A folder without an index falls back to the read-only browse view.
+    await page.goto(`/apps/${SLUG}/docs/`);
+    await expect(page.getByTestId("breadcrumbs")).toContainText("docs");
+    await expect(page.getByText("readme.md")).toBeVisible();
 
     // No write or management affordances.
     await expect(page.getByTestId("new-folder")).toHaveCount(0);
     await expect(page.getByTestId("upload-button")).toHaveCount(0);
     await expect(page.getByTestId("sidebar")).toHaveCount(0);
-
-    await page.getByTestId("open-dir").filter({ hasText: "docs" }).click();
-    await expect(page.getByTestId("breadcrumbs")).toContainText("docs");
-    await expect(page.getByText("readme.md")).toBeVisible();
 
     // Preview stays under the alias and downloads through it.
     await page.locator('[data-entry-name="readme.md"]').getByTestId("open-preview").click();
@@ -127,7 +131,9 @@ test.describe.serial("pretty public URLs", () => {
 
     const anon = await browser.newContext();
     const anonPage = await anon.newPage();
-    const gone = await anonPage.goto(`/apps/${SLUG}`);
+    // A cache-busting query keeps a previously served index response
+    // from masking the new 404 in the browser cache.
+    const gone = await anonPage.goto(`/apps/${SLUG}?unpublished=1`);
     // Production serves the alias route only while public, so the whole
     // shell is a 404. The Vite dev server serves the shell and the SPA
     // gate renders the explicit not-available state instead.
@@ -144,9 +150,10 @@ test.describe.serial("pretty public URLs", () => {
     await page.getByTestId("vdir-save").click();
     await expect(page.getByTestId("vdirs-page")).toBeVisible();
 
-    await anonPage.goto(`/apps/${SLUG}`);
-    await expect(anonPage.getByTestId("breadcrumbs")).toContainText("Public");
-    await expect(anonPage.getByText("hello.txt")).toBeVisible();
+    const restored = await anonPage.goto(`/apps/${SLUG}`);
+    expect(restored?.status()).toBe(200);
+    await expect(anonPage.getByText("stratofold hosting")).toBeVisible();
+    await expect(anonPage.getByTestId("breadcrumbs")).toHaveCount(0);
 
     // Release the name; the pretty URL stops resolving.
     await openVdirSharing(page, "Public");
@@ -154,7 +161,7 @@ test.describe.serial("pretty public URLs", () => {
     await expect(page.getByTestId("public-link")).toContainText("/v/");
     await expect(page.getByTestId("public-name-input")).toHaveValue("");
 
-    const released = await anonPage.goto(`/apps/${SLUG}`);
+    const released = await anonPage.goto(`/apps/${SLUG}?released=1`);
     if (released?.status() === 404) {
       await expect(anonPage.getByTestId("breadcrumbs")).toHaveCount(0);
     } else {

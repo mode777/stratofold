@@ -209,23 +209,27 @@ A vdir may carry one optional `public_slug`, globally unique across the
 instance, owner-managed through the vdir record. While the vdir is
 public, `/apps/<name>` is an additional read-only surface:
 
-- `GET /apps/<name>` redirects to the slashed browse form. Slashed paths
-  and the root-level `view` namespace serve the embedded SPA shell with
-  no SSH dial; the public browse/preview view resolves the directory and
-  keeps its own not-found/unavailable states.
+- `GET /apps/<name>` redirects to the slashed form. A slashed directory
+  path serves its `<dir>/index.html` when the sandbox finds a regular
+  file, using the same file-server semantics as `/files`; otherwise it
+  serves the embedded SPA browse shell. The index probe is one remote
+  stat, and the browse view keeps its own not-found/unavailable states.
 - An unslashed path that resolves to a regular file streams through the
   same vdir sandbox and `fileserver` Range/conditional/ETag/HEAD path as
   `/files`. An unslashed directory redirects to its slashed form; a
-  missing or sandbox-rejected path is `404`. Directory URLs never resolve
-  an implicit `index.html` and never auto-index.
+  missing or sandbox-rejected path is `404`. There is no autoindex and
+  the only default document is `index.html`.
 - `view` at the alias root is the preview namespace (mirroring
-  `/v/<vdir-id>/view`); a remote root-level `view` directory is reachable
-  only through `/files/<vdir-id>/view/…`.
+  `/v/<vdir-id>/view`); a remote root-level `view` directory or its
+  index is never served there and is reachable only through
+  `/files/<vdir-id>/view/…`.
 - The alias is resolved from SQLite on every request and requires the
   current `is_public`; unknown, released, renamed-away, and non-public
   names are indistinguishable `404`s decided before any dial. No cookie
   or bearer is consulted. See
-  [ADR 0018](decisions/0018-global-pretty-public-urls.md) and the
+  [ADR 0019](decisions/0019-index-documents-on-public-urls.md) (which
+  supersedes the index rule in
+  [ADR 0018](decisions/0018-global-pretty-public-urls.md)) and the
   `public-urls` spec.
 
 ### Vdir access tokens — `/api/sf/tokens`
@@ -336,8 +340,10 @@ Shipped screens and routes:
   (`web/src/lib/bulkOps.ts`); there is no server-side batch endpoint, and
   per-item failures are reported while the rest apply.
 - `/apps/:alias/*` — the same read-only public browse view under a
-  registered pretty URL, resolved through `/api/sf/public-urls/<name>`;
-  folder, breadcrumb, and back navigation stay under the alias, previews
+  registered pretty URL, resolved through `/api/sf/public-urls/<name>`
+  when the server serves no `index.html` (an existing index takes
+  precedence at directory URLs); folder, breadcrumb, and back navigation
+  stay under the alias, previews
   use `/apps/:alias/view/*`, and an unknown/released/un-published name
   renders the explicit not-available state (never the login screen).
   Signed-in visitors get the same read-only presentation; the app shell

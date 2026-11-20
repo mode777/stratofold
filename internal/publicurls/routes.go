@@ -3,6 +3,7 @@ package publicurls
 import (
 	"errors"
 	"net/http"
+	"path"
 	"strings"
 
 	"github.com/pocketbase/pocketbase/core"
@@ -92,10 +93,11 @@ func handleRoot(e *core.RequestEvent) error {
 	return e.Redirect(http.StatusMovedPermanently, u.String())
 }
 
-// handlePath is the design D4 split: slashed paths (and the root-level
-// view namespace) are the SPA's browse/preview routes and need no SSH
-// dial; an unslashed path is a direct-file request resolved through the
-// vdir sandbox.
+// handlePath routes the alias surface. The root-level view namespace is
+// always the SPA preview shell; a slashed directory path serves its
+// index.html when one exists and otherwise falls back to the SPA browse
+// shell; an unslashed path is a direct-file request resolved through
+// the vdir sandbox.
 func handlePath(e *core.RequestEvent) error {
 	record, ok := findPublicAlias(e.App, e.Request.PathValue("name"))
 	if !ok {
@@ -106,8 +108,11 @@ func handlePath(e *core.RequestEvent) error {
 	hadSlash := strings.HasSuffix(rawTail, "/")
 	virtualPath := strings.TrimRight(rawTail, "/")
 
-	if virtualPath == "" || hadSlash || isPreviewPath(virtualPath) {
+	if isPreviewPath(virtualPath) {
 		return serveShell(e)
+	}
+	if virtualPath == "" || hadSlash {
+		return serveDirectory(e, record.Id, virtualPath)
 	}
 
 	ctx := e.Request.Context()
@@ -125,6 +130,24 @@ func handlePath(e *core.RequestEvent) error {
 		return e.Redirect(http.StatusMovedPermanently, u.String())
 	}
 	return fileserver.ServeFile(e, ctx, res, st, version, rawTail)
+}
+
+// serveDirectory serves <dir>/index.html when it is a regular file in
+// the vdir sandbox, and otherwise returns the SPA shell for the browse
+// view. The index probe is the one directory-URL stat; a miss or an
+// unrelated stat failure falls back to the shell, whose listing owns the
+// not-found/retryable states.
+func serveDirectory(e *core.RequestEvent, vdirID, dir string) error {
+	indexPath := path.Join(dir, "index.html")
+	ctx := e.Request.Context()
+	res, st, version, err := fileserver.StatResolved(ctx, e.App, vdirID, indexPath)
+	if err == nil && !st.IsDir() {
+		return fileserver.ServeFile(e, ctx, res, st, version, indexPath)
+	}
+	if err != nil && errors.Is(err, fileserver.ErrVersionStore) {
+		return e.InternalServerError("Internal error.", nil)
+	}
+	return serveShell(e)
 }
 
 // isPreviewPath reserves only the root-level view segment, mirroring
