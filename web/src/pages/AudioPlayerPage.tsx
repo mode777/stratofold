@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { ApiFailure, filesUrl, type LsEntry } from "../lib/filesApi";
 import { entryKind } from "../lib/entryKind";
-import { joinPath, parentPath, previewUrl } from "../lib/listing";
+import { joinPath, parentPath, previewPath } from "../lib/listing";
 import { FailureState } from "../components/Errors";
 import { DownloadIcon, MusicIcon, PauseIcon, PlayIcon } from "../components/icons";
 
@@ -25,11 +25,13 @@ function clock(seconds: number): string {
 
 export function AudioPlayerPage({
   vdirId,
+  basePath,
   path,
   entry,
   listing,
 }: {
   vdirId: string;
+  basePath?: string;
   path: string;
   entry: LsEntry;
   listing: LsEntry[];
@@ -140,7 +142,7 @@ export function AudioPlayerPage({
       return;
     }
     autoplayRef.current = autoplay;
-    void navigate(previewUrl(vdirId, targetPath), { replace: true });
+    void navigate(previewPath(basePath ?? `/v/${encodeURIComponent(vdirId)}`, targetPath), { replace: true });
   };
 
   const retry = () => {

@@ -18,6 +18,7 @@ import (
 	"github.com/mode777/stratofold/internal/fsapi"
 	// app migrations (connections/vdirs collections) register on import.
 	_ "github.com/mode777/stratofold/internal/migrations"
+	"github.com/mode777/stratofold/internal/publicurls"
 	"github.com/mode777/stratofold/internal/userlookup"
 	"github.com/mode777/stratofold/internal/vdirmeta"
 	"github.com/mode777/stratofold/internal/vdirtokens"
@@ -71,6 +72,8 @@ type Options struct {
 func Install(app core.App, opts Options) {
 	// Connection records ↔ SSH managers (sealing, hiding, invalidation).
 	connreg.Register(app)
+	// Public-name validation for the /apps alias surface.
+	publicurls.Register(app)
 
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		timeouts := DefaultTimeouts()
@@ -97,6 +100,11 @@ func Install(app core.App, opts Options) {
 		// The public-vdir metadata route is session-free by design;
 		// like every custom route it must precede the SPA catch-all.
 		vdirmeta.RegisterRoutes(se.Router.RouterGroup)
+		// Pretty public URLs (/apps/<name>) and their session-free
+		// resolver. Registered before the catch-all; /apps is also a
+		// reserved SPA prefix so a miss never becomes the app shell.
+		publicurls.RegisterRoutes(se.Router.RouterGroup,
+			&hook.Handler[*core.RequestEvent]{Func: ClearStreamDeadlines()})
 		// The embedded SPA catch-all is registered last so the API
 		// routes above (more specific patterns) always win.
 		webassets.RegisterRoutes(se.Router.RouterGroup)

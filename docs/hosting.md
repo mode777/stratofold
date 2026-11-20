@@ -89,9 +89,9 @@ docker run --rm -it -v stratofold-data:/pb_data \
   or one over the entry and size ceilings (100,000 entries, 50 GiB
   unpacked — entries deeper than 64 levels are skipped), fails outright
   ([archive-extraction spec](../openspec/specs/archive-extraction/spec.md)).
-- **One port for everything.** `/` (web app), `/api/*`, `/files/*`, and
-  `/_/` (admin UI) are all served by the same listener — nothing needs a
-  second upstream.
+- **One port for everything.** `/` (web app), `/api/*`, `/apps/*`,
+  `/files/*`, and `/_/` (admin UI) are all served by the same listener —
+  nothing needs a second upstream.
 - **State survives restarts.** Users and virtual directories live in the
   SQLite database under `/pb_data` and are still present after the
   container is stopped and started again with the same volume
@@ -106,6 +106,15 @@ docker run --rm -it -v stratofold-data:/pb_data \
   buffering and preserve `Range` headers so seeking and long media
   playback work. Links are fixed at 24 hours; there is no server setting
   to change that today.
+- **Pretty public URLs.** `/apps/<name>` is an additional read-only
+  surface for a public vdir: it renders the public browse view and
+  streams direct file paths with the same Range/conditional/resume
+  behavior as `/files/`, so the same proxy-buffering and `Range` notes
+  apply. Access needs no authentication and no extra upstream; unknown,
+  released, and non-public names are a plain `404`. Public names are
+  globally unique per instance and appear in reverse-proxy access logs
+  like any other path. A name is registration metadata only — it never
+  publishes a private vdir and never carries a token.
 - **API access tokens.** **Settings → Connected apps** mints
   vdir-scoped bearer tokens for scripts and third-party apps. The
   plaintext is shown once and stored only as a SHA-256 hash; revoking it

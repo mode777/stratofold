@@ -129,7 +129,23 @@ describe("UploadPanel", () => {
   it("lists archive extractions with progress and cancel", async () => {
     const { fn } = fakeUpload();
     const queue = new UploadQueue(fn);
-    const cancel = vi.fn<ExtractApi["cancel"]>();
+    // The cancel mock must return the server's terminal job: the panel
+    // renders that snapshot, and an undefined response would be a
+    // tracker-invalid state rather than a realistic cancellation.
+    const cancel = vi.fn<ExtractApi["cancel"]>(async () => ({
+      id: "j1",
+      state: "canceled" as const,
+      phase: "extracting" as const,
+      path: "docs/photos.zip",
+      target: "docs/photos",
+      skipped: 2,
+      entriesTotal: 4,
+      entriesDone: 1,
+      bytesTotal: 100,
+      bytesDone: 25,
+      startedAt: "2026-11-15T10:00:00Z",
+      finishedAt: "2026-11-15T10:00:01Z",
+    }));
     const api: ExtractApi = {
       start: vi.fn(async () => ({
         id: "j1",

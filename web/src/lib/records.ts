@@ -5,7 +5,7 @@
 // 401s through the same interceptor as the /api/sf wrappers.
 
 import { ClientResponseError } from "pocketbase";
-import { ApiFailure, failureFor } from "./filesApi";
+import { ApiFailure, failureFor, type FieldErrors } from "./filesApi";
 import { pb } from "./pb";
 
 export type VdirRecord = {
@@ -15,6 +15,8 @@ export type VdirRecord = {
   root_path: string;
   is_public: boolean;
   connection: string;
+  // Optional globally unique public name for /apps/<name>.
+  public_slug?: string;
 };
 
 export type ConnectionRecord = {
@@ -42,7 +44,11 @@ export function toApiFailure(err: unknown): ApiFailure {
   if (err instanceof ApiFailure) return err;
   const status = err instanceof ClientResponseError ? err.status : 0;
   const message = err instanceof Error ? err.message : "Request failed";
-  return failureFor(status, message);
+  const fieldErrors =
+    err instanceof ClientResponseError
+      ? (err.response?.data as FieldErrors | undefined)
+      : undefined;
+  return failureFor(status, message, fieldErrors);
 }
 
 export async function listVdirs(): Promise<VdirRecord[]> {

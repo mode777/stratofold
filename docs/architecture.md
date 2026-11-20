@@ -20,7 +20,7 @@ hosts. The SPA is embedded in the binary.
   /      static (SPA) |  +------------------------------------------------------+  |
   /api/   REST API    |  | PocketBase core: users, auth, SQLite, admin UI       |  |
   /files/ streaming   |  | Custom REST API  /api/sf/*                           |  |
-                      |  | Streaming file server /files/*                       |  |
+  /apps/  public URLs |  | Streaming file server /files/* + /apps/<name>        |  |
                       |  |        |                    |                        |  |
                       |  |        +--- SSH connection -+                        |  |
                       |  |              manager (dial on demand,                |  |
@@ -75,6 +75,12 @@ Covers what PocketBase cannot: operations against remote hosts.
   at most one record, no listing/search form (any other query shape is
   `400`). It exists so the SPA can grant a share by email without
   exposing a user directory.
+- `GET /api/sf/public-urls/{name}` — session-free resolver for the pretty
+  public URL surface. For a public vdir whose `public_slug` matches it
+  returns only `{vdir, name}`; unknown, released, and non-public names
+  are the same `404` with no vdir data. The SPA uses it to resolve
+  `/apps/:alias` without a redirect. No cache: lifecycle changes apply to
+  the next request.
 - `POST /api/sf/vdirs/{id}/ls` — directory listing (JSON body
   `{"path": …}`, the vdir root when empty) returning entries with
   name, size, directory flag, modification time, and the opaque content
@@ -197,6 +203,31 @@ served to everyone. `/files` exposes the representation headers a
 cross-origin SDK needs; PocketBase's global CORS permits the
 `Authorization` and `Range` preflight.
 
+### Pretty public URLs — `/apps/<name>`
+
+A vdir may carry one optional `public_slug`, globally unique across the
+instance, owner-managed through the vdir record. While the vdir is
+public, `/apps/<name>` is an additional read-only surface:
+
+- `GET /apps/<name>` redirects to the slashed browse form. Slashed paths
+  and the root-level `view` namespace serve the embedded SPA shell with
+  no SSH dial; the public browse/preview view resolves the directory and
+  keeps its own not-found/unavailable states.
+- An unslashed path that resolves to a regular file streams through the
+  same vdir sandbox and `fileserver` Range/conditional/ETag/HEAD path as
+  `/files`. An unslashed directory redirects to its slashed form; a
+  missing or sandbox-rejected path is `404`. Directory URLs never resolve
+  an implicit `index.html` and never auto-index.
+- `view` at the alias root is the preview namespace (mirroring
+  `/v/<vdir-id>/view`); a remote root-level `view` directory is reachable
+  only through `/files/<vdir-id>/view/…`.
+- The alias is resolved from SQLite on every request and requires the
+  current `is_public`; unknown, released, renamed-away, and non-public
+  names are indistinguishable `404`s decided before any dial. No cookie
+  or bearer is consulted. See
+  [ADR 0018](decisions/0018-global-pretty-public-urls.md) and the
+  `public-urls` spec.
+
 ### Vdir access tokens — `/api/sf/tokens`
 
 A token is user-bound and scoped to one vdir, with role `viewer` or
@@ -304,6 +335,16 @@ Shipped screens and routes:
   over the same per-item `mv`/`rm` operations with bounded concurrency
   (`web/src/lib/bulkOps.ts`); there is no server-side batch endpoint, and
   per-item failures are reported while the rest apply.
+- `/apps/:alias/*` — the same read-only public browse view under a
+  registered pretty URL, resolved through `/api/sf/public-urls/<name>`;
+  folder, breadcrumb, and back navigation stay under the alias, previews
+  use `/apps/:alias/view/*`, and an unknown/released/un-published name
+  renders the explicit not-available state (never the login screen).
+  Signed-in visitors get the same read-only presentation; the app shell
+  and management destinations remain on the `/v` and settings routes.
+- Vdirs may register a `public_slug` in the sharing screen; the public
+  link there and per-file **Copy public link** prefer `/apps/<name>` when
+  one is registered, otherwise `/v/<vdir-id>` and `/files/<vdir-id>/…`.
 - `/connections`, `/vdirs` — create/edit/delete the user's own
   connections and vdirs over the record API; secrets are write-only
   (never returned by the server, empty on edit = unchanged); the host-key
@@ -326,7 +367,7 @@ in-app navigation only (see the Upload flow).
 | ---------- | --------------- | ----- |
 | `users` | PocketBase auth collection | built-in |
 | `connections` | owner, label, host, port, username, auth method (`password`\|`key`), password, private key, key passphrase, host-key fingerprint (optional), remote directory | owner-only CRUD via API rules; secrets sealed at rest (AES-256-GCM, key in `_params`) and absent from every API response; host key pinned when supplied, otherwise captured on first successful use (ADR 0007); `remote_dir` is a record-only default for new vdir root paths |
-| `vdirs` | owner, connection (rel), name, root path, is public | owner-only CRUD; reads (list/view) extend to users holding a share (back-relation rule, multi-match `?=`); a vdir must reference an own connection (rule-guarded on create and rebind); unique(owner, name); `is_public` grants anonymous read-only access |
+| `vdirs` | owner, connection (rel), name, root path, is public, `public_slug` | owner-only CRUD; reads (list/view) extend to users holding a share (back-relation rule, multi-match `?=`); a vdir must reference an own connection (rule-guarded on create and rebind); unique(owner, name); `is_public` grants anonymous read-only access; optional globally unique `public_slug` (2–63 lowercase letters/digits/hyphens) serves `/apps/<name>` only while public |
 | `vdir_shares` | vdir (rel, cascade), user (rel, cascade), role (`viewer`/`editor`), unique(vdir, user) | owner-managed via API rules; the grantee sees their own shares; drives both the record-API read extension and the `/api/sf` + `/files` middleware |
 | `vdir_tokens` | user (rel, cascade), vdir (rel, cascade), name, role (`viewer`/`editor`), token_hash (unique), token_hint, expires_at, last_used_at | rows are created/read only by the custom `/api/sf/tokens` routes; record rules are unset (superuser-only); plaintext lives only in the mint response; access is re-resolved against the user's current grant per request (ADR 0012) |
 | `file_links` | vdir (rel, cascade), path (virtual), created_by (rel, cascade), token_hash (unique), expires_at, minted_by_token (rel, nullable, cascade) | rows are created/read only by the custom mint and `/s/` routes; record rules are unset (superuser-only); tokens live only as a SHA-256 hash; fixed 24h expiry, creator access re-checked per redemption; a token-minted link also requires its source token to be live |

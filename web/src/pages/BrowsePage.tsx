@@ -7,20 +7,22 @@
 // render as distinct states with a retry action on 503.
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
-import { useLocation, useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { ls, mintFileLink, type LsEntry } from "../lib/filesApi";
 import { bulkDelete, type BulkOutcome } from "../lib/bulkOps";
 import { readDrop } from "../lib/dragDrop";
 import {
-  browseUrl,
+  browsePath,
   decodeSplat,
   joinPath,
   parentPath,
-  previewUrl,
+  previewPath,
   sortEntries,
   type SortDir,
   type SortKey,
 } from "../lib/listing";
+import { useBrowseRoute } from "../lib/browseRoute";
+import { publicAliasPath } from "../lib/publicUrl";
 import { listVdirs, toApiFailure, type VdirRecord } from "../lib/records";
 import { uploadQueue } from "../lib/uploadQueue";
 import { extractJobs } from "../lib/extractJobs";
@@ -37,7 +39,6 @@ import {
   RenameSheet,
 } from "../components/FileOpsDialogs";
 import { EmptyState, FailureState, Spinner, UnavailableState } from "../components/Errors";
-import { usePublicBrowseName } from "../components/PublicGate";
 import { EntryGrid, EntryList } from "../components/EntryViews";
 import {
   CheckIcon,
@@ -65,15 +66,14 @@ function loadView(): ViewMode {
 }
 
 export function BrowsePage() {
-  const { vdirId } = useParams();
+  const { vdirId, basePath, fileBase, publicMode, publicName } = useBrowseRoute();
   const location = useLocation();
   const { pathname } = location;
   const navigate = useNavigate();
   const path = useMemo(() => {
-    const prefix = `/v/${vdirId}`;
-    const raw = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : "";
+    const raw = pathname.startsWith(basePath) ? pathname.slice(basePath.length) : "";
     return decodeSplat(raw);
-  }, [pathname, vdirId]);
+  }, [pathname, basePath]);
 
   const [view, setView] = useState<ViewMode>(loadView);
   const [sortKey, setSortKey] = useState<SortKey>("name");
@@ -96,16 +96,22 @@ export function BrowsePage() {
   const bulkLock = useRef(false);
 
   const { canWrite } = useVdirRole(vdir);
-  // Public mode (design D3): the anonymous browse view takes the
-  // vdir's name from the meta probe, skips the authenticated record
+  // Public mode (design D3/D7): the long-lived public browse view takes
+  // its name from the alias/meta gate, skips the authenticated record
   // API entirely, and can never write (vdir stays null → role none).
-  const publicName = usePublicBrowseName();
-  const publicMode = publicName !== null;
   const { state: sessionState } = useSession();
   const isPublicVdir = publicMode || vdir?.is_public === true;
   // Temporary links are for signed-in readers of a non-public vdir;
   // public vdirs keep the permanent Copy public link (design D11).
   const canMintLink = sessionState === "authenticated" && vdir !== null && !isPublicVdir;
+  // Alias routes download through the alias; signed-in /v views keep
+  // /files unless a registered name is being copied as the public link.
+  const publicFileBase =
+    publicMode && fileBase.startsWith("/apps/")
+      ? fileBase
+      : isPublicVdir && vdir?.public_slug
+        ? publicAliasPath(vdir.public_slug)
+        : undefined;
   const vdirName = publicMode ? (publicName ?? "") : (vdir?.name ?? "");
 
   const currentName = useMemo(() => {
@@ -344,9 +350,9 @@ export function BrowsePage() {
     });
   }, [path]);
 
-  const openDir = (next: string) => void navigate(browseUrl(vdirId ?? "", next));
+  const openDir = (next: string) => void navigate(browsePath(basePath, next));
   const openPreview = (_entry: LsEntry, entryPath: string) =>
-    void navigate(previewUrl(vdirId ?? "", entryPath));
+    void navigate(previewPath(basePath, entryPath));
   const startMove = (entry: LsEntry, entryPath: string) => {
     setMenu(null);
     void navigate(`/v/${vdirId}/move`, {
@@ -369,7 +375,7 @@ export function BrowsePage() {
 
   const goBack = () => {
     if (!path) void navigate("/files");
-    else void navigate(browseUrl(vdirId ?? "", parentPath(path)));
+    else void navigate(browsePath(basePath, parentPath(path)));
   };
 
   // renderFailure maps the deterministic error classes into the
@@ -498,7 +504,7 @@ export function BrowsePage() {
             </div>
           </div>
         )}
-        <Breadcrumbs vdirId={vdirId ?? ""} vdirName={vdirName} path={path} />
+        <Breadcrumbs basePath={basePath} vdirName={vdirName} path={path} />
         {dropFailures.length > 0 && (
           <div
             role="alert"
@@ -623,6 +629,8 @@ export function BrowsePage() {
       {menu && (
         <ContextMenu
           vdirId={vdirId ?? ""}
+          fileBase={fileBase}
+          publicFileBase={publicFileBase}
           entry={menu.entry}
           path={menu.path}
           canWrite={canWrite}

@@ -25,6 +25,11 @@ multi-gigabyte transfers are ordinary.
   access per directory, make a directory public for anyone with its link,
   or hand out a 24-hour link to one file. Access is re-checked on every
   request; revocation is immediate.
+- **Pretty public URLs** — give a public directory a globally unique,
+  memorable name and serve it at `/apps/my-public-folder`, with direct
+  file paths for downloads and media. The name never publishes a private
+  directory; un-publishing makes the URL 404 while keeping the name
+  reserved.
 - **App tokens** — mint a revocable, single-directory bearer token for a
   script or frontend app, with a viewer or editor role and an optional
   expiry, and copy a one-paste connection string for

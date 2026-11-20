@@ -20,15 +20,22 @@ export type FailureKind =
   | "rejected"
   | "server";
 
+export type FieldErrors = Record<string, { code?: string; message?: string } | undefined>;
+
 export class ApiFailure extends Error {
   readonly kind: FailureKind;
   readonly status: number;
+  // Field-level validation errors from a PocketBase record response
+  // (data.<field>), preserved for callers that need to explain a
+  // duplicate name or an invalid value.
+  readonly fieldErrors?: FieldErrors;
 
-  constructor(kind: FailureKind, status: number, message: string) {
+  constructor(kind: FailureKind, status: number, message: string, fieldErrors?: FieldErrors) {
     super(message);
     this.name = "ApiFailure";
     this.kind = kind;
     this.status = status;
+    this.fieldErrors = fieldErrors;
   }
 }
 
@@ -50,9 +57,9 @@ export function notifyUnauthorized(): void {
 // failureFor maps an HTTP status to the failure kind (the API's
 // deterministic classes) — shared by the fetch wrappers and the
 // PocketBase SDK record layer.
-export function failureFor(status: number, message: string): ApiFailure {
+export function failureFor(status: number, message: string, fieldErrors?: FieldErrors): ApiFailure {
   if (status === 401) notifyUnauthorized();
-  return new ApiFailure(failureKind(status), status, message);
+  return new ApiFailure(failureKind(status), status, message, fieldErrors);
 }
 
 function failureKind(status: number): FailureKind {
@@ -215,15 +222,22 @@ export function uploadFile(
   });
 }
 
-// filesUrl builds the plain /files/<vdir-id>/<virtual-path> URL for a
-// vdir path — the download/media address that works with the session
-// cookie alone.
-export function filesUrl(vdirId: string, path: string): string {
+// fileUrlFrom builds a direct-file URL under an arbitrary base
+// (/files/<vdir-id> or /apps/<alias>), encoding each segment once.
+export function fileUrlFrom(base: string, path: string): string {
   const segments = path
     .split("/")
     .filter((s) => s.length > 0)
     .map((s) => encodeURIComponent(s));
-  return `/files/${encodeURIComponent(vdirId)}${segments.length ? "/" + segments.join("/") : ""}`;
+  const root = base.endsWith("/") ? base.slice(0, -1) : base;
+  return `${root}${segments.length ? "/" + segments.join("/") : ""}`;
+}
+
+// filesUrl builds the plain /files/<vdir-id>/<virtual-path> URL for a
+// vdir path — the download/media address that works with the session
+// cookie alone.
+export function filesUrl(vdirId: string, path: string): string {
+  return fileUrlFrom(`/files/${encodeURIComponent(vdirId)}`, path);
 }
 
 export type FileLink = { url: string; expiresAt: string };

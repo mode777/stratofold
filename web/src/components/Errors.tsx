@@ -117,7 +117,13 @@ export function EmptyState({ title, hint }: { title: string; hint?: string }) {
 // failure states (web-ui public-browsing spec): the vdir stopped
 // being public (or the path vanished) — never a silent failure, never
 // an unexplained error; the sign-in affordance is the way back in.
-export function UnavailableState({ onSignIn }: { onSignIn: () => void }) {
+export function UnavailableState({
+  onSignIn,
+  actionLabel = "Sign in",
+}: {
+  onSignIn: () => void;
+  actionLabel?: string;
+}) {
   return (
     <StateBlock
       testid="state-unavailable"
@@ -132,7 +138,7 @@ export function UnavailableState({ onSignIn }: { onSignIn: () => void }) {
           onClick={onSignIn}
           className="rounded-xl bg-ios-blue px-6 py-3 font-semibold text-white shadow-sm active:scale-95"
         >
-          Sign in
+          {actionLabel}
         </button>
       }
     />

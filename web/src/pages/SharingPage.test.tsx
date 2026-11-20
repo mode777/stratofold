@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { ClientResponseError } from "pocketbase";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SharingPage } from "./SharingPage";
@@ -79,6 +80,56 @@ function renderSharing() {
 
 function vdirHandler(): SendHandler {
   return (path) => (path.includes("/collections/vdirs/records") ? listOf([VDIR]) : undefined);
+}
+
+// vdirStore is a stateful vdir record transport: PATCH applies the body
+// so the page's refetch observes the new public name, and an optional
+// error models the server's duplicate-name rejection.
+function vdirStore(initial: Record<string, unknown>, patchError?: unknown) {
+  let vdir = { ...initial };
+  const calls: Call[] = [];
+  const handler: SendHandler = (path, options) => {
+    if (!path.includes("/collections/vdirs/records")) return undefined;
+    const method = options.method ?? "GET";
+    if (method === "GET") return listOf([vdir]);
+    if (method === "PATCH") {
+      const body = (options.body ?? {}) as Record<string, unknown>;
+      calls.push({ method, path, body });
+      if (patchError) throw patchError;
+      vdir = { ...vdir, ...body };
+      return vdir;
+    }
+    return undefined;
+  };
+  return { handler, calls };
+}
+
+function duplicateNameError(): ClientResponseError {
+  return new ClientResponseError({
+    status: 400,
+    response: {
+      code: 400,
+      message: "Failed to update record.",
+      data: {
+        public_slug: {
+          code: "validation_not_unique",
+          message: "This public name is already taken.",
+        },
+      },
+    },
+  });
+}
+
+function renderWithVdirs(handlers: SendHandler[]) {
+  installPbMock([...handlers, (path) => (path.includes("/collections/vdir_shares/records") ? listOf([]) : undefined)]);
+  installFetchMock([]);
+  return render(
+    <MemoryRouter initialEntries={["/settings/vdirs/v1/sharing"]}>
+      <Routes>
+        <Route path="/settings/vdirs/:id/sharing" element={<SharingPage />} />
+      </Routes>
+    </MemoryRouter>,
+  );
 }
 
 beforeEach(() => localStorage.clear());
@@ -233,5 +284,99 @@ describe("sharing page public link", () => {
     expect(screen.getByTestId("public-link-none")).toBeInTheDocument();
     expect(screen.queryByTestId("public-link")).not.toBeInTheDocument();
     expect(screen.queryByTestId("public-link-copy")).not.toBeInTheDocument();
+  });
+});
+
+describe("sharing page public name", () => {
+  const BASE = { id: "v1", owner: "u1", name: "Mine", root_path: "/srv", connection: "c1" };
+
+  it("claims a lowercase name and shows the pretty public link", async () => {
+    const store = vdirStore({ ...BASE, is_public: true });
+    renderWithVdirs([store.handler]);
+
+    const input = await screen.findByTestId("public-name-input");
+    await userEvent.setup().type(input, "My-Folder");
+    expect(input).toHaveValue("my-folder");
+
+    await userEvent.setup().click(screen.getByTestId("public-name-save"));
+
+    await waitFor(() => expect(store.calls.some((c) => c.method === "PATCH")).toBe(true));
+    expect(store.calls.find((c) => c.method === "PATCH")!.body).toEqual({ public_slug: "my-folder" });
+    await waitFor(() =>
+      expect(screen.getByTestId("public-link")).toHaveTextContent(`${window.location.origin}/apps/my-folder`),
+    );
+  });
+
+  it("changes and releases an existing name", async () => {
+    const store = vdirStore({ ...BASE, is_public: true, public_slug: "old-name" });
+    renderWithVdirs([store.handler]);
+
+    const input = await screen.findByTestId("public-name-input");
+    await waitFor(() => expect(input).toHaveValue("old-name"));
+    await userEvent.setup().clear(input);
+    await userEvent.setup().type(input, "new-name");
+    await userEvent.setup().click(screen.getByTestId("public-name-save"));
+
+    await waitFor(() =>
+      expect(store.calls.find((c) => c.method === "PATCH")!.body).toEqual({ public_slug: "new-name" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("public-link")).toHaveTextContent(`${window.location.origin}/apps/new-name`),
+    );
+
+    await userEvent.setup().click(screen.getByTestId("public-name-remove"));
+    await waitFor(() =>
+      expect(store.calls[store.calls.length - 1].body).toEqual({ public_slug: "" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("public-link")).toHaveTextContent(`${window.location.origin}/v/v1`),
+    );
+  });
+
+  it("refuses invalid input before sending an update", async () => {
+    const store = vdirStore({ ...BASE, is_public: true });
+    renderWithVdirs([store.handler]);
+
+    const input = await screen.findByTestId("public-name-input");
+    await userEvent.setup().type(input, "a");
+    await userEvent.setup().click(screen.getByTestId("public-name-save"));
+
+    await waitFor(() => expect(screen.getByTestId("public-name-error")).toHaveTextContent("2–63"));
+    expect(store.calls.some((c) => c.method === "PATCH")).toBe(false);
+  });
+
+  it("surfaces a duplicate name without changing the link", async () => {
+    const store = vdirStore({ ...BASE, is_public: true, public_slug: "mine" }, duplicateNameError());
+    renderWithVdirs([store.handler]);
+
+    const input = await screen.findByTestId("public-name-input");
+    await waitFor(() => expect(input).toHaveValue("mine"));
+    await userEvent.setup().clear(input);
+    await userEvent.setup().type(input, "taken");
+    await userEvent.setup().click(screen.getByTestId("public-name-save"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("public-name-error")).toHaveTextContent("already taken"),
+    );
+    expect(screen.getByTestId("public-link")).toHaveTextContent(`${window.location.origin}/apps/mine`);
+  });
+
+  it("describes a name on a private vdir as reserved", async () => {
+    const store = vdirStore({ ...BASE, is_public: false, public_slug: "reserved-name" });
+    renderWithVdirs([store.handler]);
+
+    await screen.findByTestId("public-name-reserved");
+    expect(screen.getByTestId("public-name-reserved")).toHaveTextContent("reserved");
+    expect(screen.getByTestId("public-link-reserved")).toHaveTextContent("/apps/reserved-name");
+    expect(screen.queryByTestId("public-link")).not.toBeInTheDocument();
+  });
+
+  it("offers the control only to the vdir owner", async () => {
+    const store = vdirStore({ ...BASE, owner: "u2", is_public: true });
+    renderWithVdirs([store.handler]);
+
+    await screen.findByTestId("public-link-section");
+    expect(screen.queryByTestId("public-name-section")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("public-name-input")).not.toBeInTheDocument();
   });
 });

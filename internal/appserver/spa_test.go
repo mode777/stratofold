@@ -110,6 +110,21 @@ func TestSPAServing(t *testing.T) {
 		}
 	})
 
+	t.Run("pretty URL namespace misses never fall back", func(t *testing.T) {
+		resp, err := http.Get(s.BaseURL + "/apps/definitely-missing")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body := bodyBytes(t, resp)
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("GET /apps/definitely-missing: status %d, want 404", resp.StatusCode)
+		}
+		if bytes.Contains(body, []byte(placeholderMarker)) {
+			t.Fatal("pretty URL namespace miss returned the SPA shell")
+		}
+	})
+
 	t.Run("link namespace misses never fall back", func(t *testing.T) {
 		resp, err := http.Get(s.BaseURL + "/s/definitely-missing")
 		if err != nil {

@@ -12,7 +12,7 @@
 
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { filesUrl, type LsEntry } from "../lib/filesApi";
+import { filesUrl, fileUrlFrom, type LsEntry } from "../lib/filesApi";
 import { entryKind } from "../lib/entryKind";
 import {
   ArchiveIcon,
@@ -86,6 +86,8 @@ export function ContextMenu({
   entry,
   path,
   vdirId,
+  fileBase,
+  publicFileBase,
   canWrite,
   isPublic = false,
   canMintLink = false,
@@ -101,6 +103,8 @@ export function ContextMenu({
   entry: LsEntry;
   path: string;
   vdirId: string;
+  fileBase?: string;
+  publicFileBase?: string;
   canWrite: boolean;
   isPublic?: boolean;
   canMintLink?: boolean;
@@ -124,7 +128,8 @@ export function ContextMenu({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const url = filesUrl(vdirId, path);
+  const url = fileBase ? fileUrlFrom(fileBase, path) : filesUrl(vdirId, path);
+  const publicUrl = publicFileBase ? fileUrlFrom(publicFileBase, path) : url;
   const kind = entryKind(entry.name, entry.dir);
   const visual = entryVisual(entry);
 
@@ -134,7 +139,7 @@ export function ContextMenu({
   // leaves the row unchanged (design D4).
   const copyPublicLink = async () => {
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}${url}`);
+      await navigator.clipboard.writeText(`${window.location.origin}${publicUrl}`);
       setCopied(true);
     } catch {
       setCopied(false);

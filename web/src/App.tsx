@@ -5,6 +5,8 @@ import { AppShell } from "./components/AppShell";
 import { CastIndicator } from "./components/CastIndicator";
 import { CastProvider } from "./lib/cast";
 import { PublicGate } from "./components/PublicGate";
+import { AliasGate } from "./components/AliasGate";
+import { VdirBrowseProvider } from "./lib/browseRoute";
 import { LoginPage } from "./pages/LoginPage";
 import { LocationsPage } from "./pages/LocationsPage";
 import { BrowsePage } from "./pages/BrowsePage";
@@ -48,9 +50,11 @@ function SessionGate() {
 
 // isAnonymousAllowed reports whether the location is a vdir browse or
 // preview route — the only shapes an unauthenticated visitor may open.
+// Pretty public URLs (/apps/<alias>/...) are the second browse shape.
 // The move picker and every management destination stay behind login.
 function isAnonymousAllowed(pathname: string): boolean {
   const segments = pathname.split("/").filter((s) => s.length > 0);
+  if (segments[0] === "apps") return segments.length >= 2;
   if (segments[0] !== "v" || segments.length < 2) return false;
   return segments[2] !== "move";
 }
@@ -66,6 +70,8 @@ function PublicRoutes() {
       <Route element={<PublicShell />}>
         <Route path="/v/:vdirId/view/*" element={<PublicGate><PreviewPage /></PublicGate>} />
         <Route path="/v/:vdirId/*" element={<PublicGate><BrowsePage /></PublicGate>} />
+        <Route path="/apps/:alias/view/*" element={<AliasGate><PreviewPage /></AliasGate>} />
+        <Route path="/apps/:alias/*" element={<AliasGate><BrowsePage /></AliasGate>} />
         <Route path="*" element={<LoginPage />} />
       </Route>
     </Routes>
@@ -87,12 +93,18 @@ function PublicShell() {
 export function AppRoutes() {
   return (
     <Routes>
+      {/* Pretty public URLs render the read-only public presentation for
+          signed-in visitors too; management stays under /v and Settings. */}
+      <Route element={<PublicShell />}>
+        <Route path="/apps/:alias/view/*" element={<AliasGate><PreviewPage /></AliasGate>} />
+        <Route path="/apps/:alias/*" element={<AliasGate><BrowsePage /></AliasGate>} />
+      </Route>
       <Route element={<AppShell />}>
         <Route path="/" element={<Navigate to="/files" replace />} />
         <Route path="/files" element={<LocationsPage />} />
-        <Route path="/v/:vdirId/view/*" element={<PreviewPage />} />
+        <Route path="/v/:vdirId/view/*" element={<VdirBrowseProvider><PreviewPage /></VdirBrowseProvider>} />
         <Route path="/v/:vdirId/move" element={<MovePickerPage />} />
-        <Route path="/v/:vdirId/*" element={<BrowsePage />} />
+        <Route path="/v/:vdirId/*" element={<VdirBrowseProvider><BrowsePage /></VdirBrowseProvider>} />
         <Route path="/uploads" element={<UploadsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/settings/apps" element={<AppsPage />} />

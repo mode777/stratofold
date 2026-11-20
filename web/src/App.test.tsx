@@ -228,3 +228,60 @@ describe("anonymous public browsing gate", () => {
     expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
   });
 });
+
+describe("pretty public URL gate", () => {
+  function aliasMeta(alias: string, status: number): FetchRoute {
+    return (url) =>
+      url === `/api/sf/public-urls/${alias}`
+        ? status === 200
+          ? jsonResponse(200, { vdir: "pub", name: "Pretty folder" })
+          : jsonResponse(404, { message: "Not found." })
+        : undefined;
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+    pb.authStore.clear();
+  });
+
+  it("renders an anonymous alias browse under the pretty URL", async () => {
+    installPbMock([]);
+    installFetchMock([
+      aliasMeta("pretty", 200),
+      lsRoute("pub", "docs", [{ name: "a.txt", size: 3, dir: false, modtime: "2026-01-02T00:00:00Z" }]),
+    ]);
+
+    renderApp("/apps/pretty/docs");
+
+    await waitFor(() => expect(screen.getByTestId("entry-0")).toHaveTextContent("a.txt"));
+    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tab-bar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("breadcrumbs")).toHaveTextContent("Pretty folder");
+  });
+
+  it("renders the alias read-only view for a signed-in visitor", async () => {
+    pb.authStore.save(fakeJwt(), OWNER as never);
+    installPbMock([authRefresh(OWNER)]);
+    installFetchMock([
+      aliasMeta("pretty", 200),
+      lsRoute("pub", "", [{ name: "a.txt", size: 3, dir: false, modtime: "2026-01-02T00:00:00Z" }]),
+    ]);
+
+    renderApp("/apps/pretty");
+
+    await waitFor(() => expect(screen.getByTestId("entry-0")).toHaveTextContent("a.txt"));
+    expect(screen.queryByTestId("tab-bar")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("header-actions")).not.toBeInTheDocument();
+  });
+
+  it("shows not-available for an unknown or un-published alias", async () => {
+    installPbMock([]);
+    installFetchMock([aliasMeta("gone", 404)]);
+
+    renderApp("/apps/gone/docs");
+
+    await waitFor(() => expect(screen.getByTestId("state-unavailable")).toBeInTheDocument());
+    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("entry-0")).not.toBeInTheDocument();
+  });
+});

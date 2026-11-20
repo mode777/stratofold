@@ -12,6 +12,7 @@ import (
 	"github.com/mode777/stratofold/internal/filelinks"
 	"github.com/mode777/stratofold/internal/fileserver"
 	"github.com/mode777/stratofold/internal/fsapi"
+	"github.com/mode777/stratofold/internal/publicurls"
 	"github.com/mode777/stratofold/internal/testapp"
 	"github.com/mode777/stratofold/internal/userlookup"
 	"github.com/mode777/stratofold/internal/vdirmeta"
@@ -100,6 +101,42 @@ func TestVdirMetaRoutesStayInsideSfNamespace(t *testing.T) {
 	for _, r := range vdirmeta.CustomRoutes() {
 		if !strings.HasPrefix(r.Path, "/api/sf/") {
 			t.Errorf("vdir-meta route %s %s escaped the /api/sf/ namespace", r.Method, r.Path)
+		}
+	}
+}
+
+func TestPublicURLRouteNamespaces(t *testing.T) {
+	routes := publicurls.CustomRoutes()
+	if len(routes) == 0 {
+		t.Fatal("no public-url routes registered")
+	}
+	for _, r := range routes {
+		if strings.HasPrefix(r.Path, "/api/") {
+			if !strings.HasPrefix(r.Path, "/api/sf/") {
+				t.Errorf("public-url API route %s %s escaped /api/sf/", r.Method, r.Path)
+			}
+			continue
+		}
+		if !strings.HasPrefix(r.Path, "/apps/") && r.Path != "/apps" {
+			t.Errorf("public-url route %s %s is not under /apps/", r.Method, r.Path)
+		}
+	}
+
+	s := testapp.Start(t)
+	for _, path := range []string{"/apps/definitely-missing", "/api/sf/public-urls/definitely-missing"} {
+		resp, err := http.Get(s.BaseURL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b := bodyBytes(t, resp)
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("GET %s: status %d, want 404", path, resp.StatusCode)
+		}
+		if !bytes.Contains(b, []byte(`"message":"Not found."`)) {
+			t.Fatalf("GET %s did not reach the public-url handler: %s", path, b)
+		}
+		if bytes.Contains(bytes.ToLower(b), []byte("<!doctype")) {
+			t.Fatalf("GET %s fell through to the SPA shell", path)
 		}
 	}
 }

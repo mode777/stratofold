@@ -95,6 +95,22 @@ the specs and files that own each fact.
   in-proc stack; against a manually-run server, point the script at it
   with `SF_BASE_URL SF_EMAIL SF_PASSWORD SF_VDIR_ID SF_PUB_VDIR_ID`
   (a public and a private vdir over the seeded dataset).
+- **Pretty public URLs** (change `add-pretty-public-urls`): a vdir's
+  optional `public_slug` (2–63 lowercase letters/digits/hyphens, globally
+  unique via a partial unique index) additionally serves the read-only
+  public surface at `/apps/<name>` while `is_public` is true. Slashed
+  alias paths and the root-level `view` namespace return the SPA shell
+  with no SSH dial; an unslashed file path streams through the
+  `fileserver` sandbox/`ServeFile` path, an unslashed directory redirects
+  to its slashed form, and missing/private/released names are the same
+  `404` (no dial, no session or token consulted). The session-free
+  resolver is `GET /api/sf/public-urls/<name>`; `/apps` is a reserved
+  SPA prefix. The sharing screen claims/changes/releases the name, and
+  public link/copy actions prefer `/apps/<name>`. A root-level `view`
+  directory is shadowed on the alias (use `/files`). Verification:
+  `go test ./internal/publicurls/ ./internal/migrations/
+  ./internal/appserver/`, `npm --prefix web run test`, and
+  `web/e2e/public-urls.spec.ts` on the verification server.
 - **Filesystem API** (roadmap change 5): `POST
   /api/sf/vdirs/<vdir-id>/{ls,stat,mkdir,mv,rm,upload}` is the write
   path — JSON bodies (`{"path": …}`, `{"path", "to"}` for mv; upload
@@ -318,8 +334,9 @@ the specs and files that own each fact.
   (`web/src/lib/useInstallPrompt.ts`), and there is deliberately **no
   service worker and no offline behavior**.
   Root script shims are
-  `npm run web` (dev server on 127.0.0.1:5173, proxying `/api`, `/files`,
-  and `/s` to 127.0.0.1:8090), `web:build` (output `web/dist`), `web:test`
+  `npm run web` (dev server on 127.0.0.1:5173, proxying `/api`, `/apps`
+  direct-file paths, `/files`, and `/s` to 127.0.0.1:8090; alias browse
+  shells stay on Vite), `web:build` (output `web/dist`), `web:test`
   (Vitest + Testing Library), `web:e2e` (Playwright). Login posts to
   `/api/sf/auth`; the token goes into the PocketBase SDK auth store
   (record API) and the `sf_session` cookie drives `/files/*`. A new

@@ -2,14 +2,14 @@
 // path segment; the current segment is not a link (aria-current).
 
 import { Link } from "react-router";
-import { browseUrl, pathSegments } from "../lib/listing";
+import { browsePath, pathSegments } from "../lib/listing";
 
 export function Breadcrumbs({
-  vdirId,
+  basePath,
   vdirName,
   path,
 }: {
-  vdirId: string;
+  basePath: string;
   vdirName: string;
   path: string;
 }) {
@@ -21,11 +21,11 @@ export function Breadcrumbs({
       className="truncate text-[12px] font-medium text-ios-secondary/70"
     >
       <Link
-        to={browseUrl(vdirId, "")}
+        to={browsePath(basePath, "")}
         aria-current={segments.length === 0 ? "page" : undefined}
         className="hover:text-ios-blue"
       >
-        {vdirName || vdirId}
+        {vdirName || basePath}
       </Link>
       {segments.map((segment, i) => (
         <span key={segment.path}>
@@ -35,7 +35,7 @@ export function Breadcrumbs({
               {segment.name}
             </span>
           ) : (
-            <Link to={browseUrl(vdirId, segment.path)} className="hover:text-ios-blue">
+            <Link to={browsePath(basePath, segment.path)} className="hover:text-ios-blue">
               {segment.name}
             </Link>
           )}

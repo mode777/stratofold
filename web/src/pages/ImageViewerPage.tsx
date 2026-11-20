@@ -17,7 +17,7 @@ import { useNavigate } from "react-router";
 import { ApiFailure, filesUrl, sfFetch, type LsEntry } from "../lib/filesApi";
 import { entryKind } from "../lib/entryKind";
 import * as gesture from "../lib/gesture";
-import { browseUrl, joinPath, parentPath, previewUrl } from "../lib/listing";
+import { browsePath, joinPath, parentPath, previewPath } from "../lib/listing";
 import { toApiFailure } from "../lib/records";
 import { FailureState, Spinner } from "../components/Errors";
 import { MetadataCard } from "../components/MetadataCard";
@@ -39,15 +39,20 @@ const TRANSITION_MS = 170;
 
 export function ImageViewerPage({
   vdirId,
+  basePath,
+  fileBase,
   path,
   entry,
   listing,
 }: {
   vdirId: string;
+  basePath?: string;
+  fileBase?: string;
   path: string;
   entry: LsEntry;
   listing: LsEntry[];
 }) {
+  const navBase = basePath ?? `/v/${encodeURIComponent(vdirId)}`;
   const navigate = useNavigate();
   const dir = parentPath(path);
   const name = path.split("/").filter(Boolean).pop() ?? "";
@@ -94,8 +99,8 @@ export function ImageViewerPage({
   const fitted = gesture.fitSize(natural, { w: vw, h: vh });
 
   const goBack = useCallback(
-    () => void navigate(browseUrl(vdirId, dir)),
-    [navigate, vdirId, dir],
+    () => void navigate(browsePath(navBase, dir)),
+    [navigate, navBase, dir],
   );
 
   const advance = useCallback(
@@ -105,9 +110,9 @@ export function ImageViewerPage({
       setCurrent(next);
       setTransform(gesture.IDENTITY);
       setNatural({ w: 0, h: 0 });
-      void navigate(previewUrl(vdirId, joinPath(dir, gallery[next].name)), { replace: true });
+      void navigate(previewPath(navBase, joinPath(dir, gallery[next].name)), { replace: true });
     },
-    [current, gallery, dir, vdirId, navigate],
+    [current, gallery, dir, navBase, navigate],
   );
 
   // Pointer bookkeeping lives in refs; rendering state (dragX,
@@ -374,7 +379,7 @@ export function ImageViewerPage({
   if (gallery.length === 0) {
     return (
       <div data-testid="image-viewer" className="fixed inset-0 z-40 overflow-y-auto bg-black">
-        <MetadataCard vdirId={vdirId} path={path} entry={entry} />
+        <MetadataCard vdirId={vdirId} fileBase={fileBase} path={path} entry={entry} />
       </div>
     );
   }
@@ -402,7 +407,7 @@ export function ImageViewerPage({
         {isCurrent && st.status === "failed" ? (
           <FailureState failure={st.failure} onRetry={() => retrySlide(p)} />
         ) : isCurrent && st.status === "undecodable" ? (
-          <MetadataCard vdirId={vdirId} path={p} entry={g} />
+          <MetadataCard vdirId={vdirId} fileBase={fileBase} path={p} entry={g} />
         ) : st.status === "ready" ? (
           <img
             src={st.url}

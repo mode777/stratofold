@@ -7,6 +7,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router";
 import { lookupUser } from "../lib/lookup";
+import { isValidPublicSlug, publicAliasPath } from "../lib/publicUrl";
 import {
   createShare,
   deleteShare,
@@ -14,13 +15,14 @@ import {
   listVdirs,
   toApiFailure,
   updateShare,
+  updateVdir,
   type ShareRecord,
   type VdirRecord,
 } from "../lib/records";
 import { useSession } from "../lib/session";
 import { FailureState, Spinner } from "../components/Errors";
 import { ChevronLeftIcon, LinkIcon, PersonIcon } from "../components/icons";
-import type { ApiFailure } from "../lib/filesApi";
+import { ApiFailure } from "../lib/filesApi";
 
 export function SharingPage() {
   const { id = "" } = useParams();
@@ -39,17 +41,79 @@ export function SharingPage() {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // The public link (web-ui spec): the plain absolute app URL, no
-  // token — its meaning is entirely the vdir's current publicness.
-  // The link always renders as selectable text so the clipboard API's
-  // secure-context requirement can never make it unobtainable.
-  const publicUrl = vdir ? `${window.location.origin}/v/${vdir.id}` : "";
+  const [slugInput, setSlugInput] = useState("");
+  const [slugError, setSlugError] = useState<string | null>(null);
+  const [slugBusy, setSlugBusy] = useState(false);
+  const [slugSaved, setSlugSaved] = useState(false);
+
+  // The public link (web-ui spec): the pretty alias when one is
+  // registered, otherwise the plain /v URL. No token — its meaning is
+  // entirely the vdir's current publicness. The link always renders as
+  // selectable text so the clipboard API's secure-context requirement
+  // can never make it unobtainable.
+  const publicUrl = vdir
+    ? `${window.location.origin}${
+        vdir.public_slug ? publicAliasPath(vdir.public_slug) : `/v/${vdir.id}`
+      }`
+    : "";
+  const isOwner = vdir !== null && vdir.owner === userId;
   const copyPublicLink = async () => {
     try {
       await navigator.clipboard.writeText(publicUrl);
       setCopied(true);
     } catch {
       setCopied(false);
+    }
+  };
+
+  useEffect(() => {
+    setSlugInput(vdir?.public_slug ?? "");
+  }, [vdir?.public_slug]);
+
+  const slugErrorText = (err: unknown): string => {
+    if (err instanceof ApiFailure) {
+      const field = err.fieldErrors?.public_slug;
+      if (field?.code === "validation_not_unique") return "That public name is already taken.";
+      if (field) return "That public name is not valid.";
+    }
+    return toApiFailure(err).message;
+  };
+
+  const saveSlug = async (e: FormEvent) => {
+    e.preventDefault();
+    const next = slugInput.trim().toLowerCase();
+    setSlugError(null);
+    setSlugSaved(false);
+    if (next !== "" && !isValidPublicSlug(next)) {
+      setSlugError("Use 2–63 lowercase letters, digits, or hyphens, starting and ending with a letter or digit.");
+      return;
+    }
+    setSlugBusy(true);
+    try {
+      await updateVdir(id, { public_slug: next });
+      setSlugInput(next);
+      setSlugSaved(true);
+      setAttempt((n) => n + 1);
+    } catch (err) {
+      setSlugError(slugErrorText(err));
+    } finally {
+      setSlugBusy(false);
+    }
+  };
+
+  const releaseSlug = async () => {
+    setSlugError(null);
+    setSlugSaved(false);
+    setSlugBusy(true);
+    try {
+      await updateVdir(id, { public_slug: "" });
+      setSlugInput("");
+      setSlugSaved(true);
+      setAttempt((n) => n + 1);
+    } catch (err) {
+      setSlugError(slugErrorText(err));
+    } finally {
+      setSlugBusy(false);
     }
   };
 
@@ -196,6 +260,74 @@ export function SharingPage() {
             </button>
           </form>
 
+          {isOwner && (
+            <section
+              data-testid="public-name-section"
+              className="space-y-2 rounded-2xl border border-black/5 bg-ios-card p-4 shadow-sm"
+            >
+              <h2 className="text-xs font-bold uppercase tracking-wider text-ios-secondary/60">Public name</h2>
+              <p className="text-xs text-ios-secondary/70">
+                Give this folder a memorable address. It only works while the vdir is public.
+              </p>
+              <form onSubmit={saveSlug} className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="shrink-0 text-xs font-medium text-ios-secondary/70">/apps/</span>
+                  <input
+                    data-testid="public-name-input"
+                    aria-label="Public name"
+                    value={slugInput}
+                    onChange={(e) => {
+                      setSlugInput(e.target.value.toLowerCase());
+                      setSlugError(null);
+                      setSlugSaved(false);
+                    }}
+                    placeholder="my-public-folder"
+                    className="min-w-0 flex-1 rounded-xl border border-ios-separator bg-ios-bg px-3 py-2 text-sm outline-none"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="submit"
+                    data-testid="public-name-save"
+                    disabled={slugBusy}
+                    className="rounded-xl bg-ios-blue px-3 py-2 text-xs font-semibold text-white shadow-sm disabled:opacity-50"
+                  >
+                    {slugBusy ? "Saving…" : "Save name"}
+                  </button>
+                  {vdir?.public_slug && (
+                    <button
+                      type="button"
+                      data-testid="public-name-remove"
+                      disabled={slugBusy}
+                      onClick={() => void releaseSlug()}
+                      className="rounded-xl border border-ios-red/20 px-3 py-2 text-xs font-medium text-ios-red disabled:opacity-50"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                {slugError && (
+                  <p role="alert" data-testid="public-name-error" className="text-xs text-ios-red">
+                    {slugError}
+                  </p>
+                )}
+                {slugSaved && (
+                  <p data-testid="public-name-saved" className="text-xs font-semibold text-ios-green">
+                    Public name saved.
+                  </p>
+                )}
+                {vdir && !vdir.is_public && vdir.public_slug && (
+                  <p data-testid="public-name-reserved" className="text-xs text-ios-secondary/70">
+                    This name is reserved; the pretty URL becomes active when the vdir is published.
+                  </p>
+                )}
+                <p className="text-[11px] text-ios-secondary/50">
+                  2–63 lowercase letters, digits, or hyphens; start and end with a letter or digit.
+                </p>
+              </form>
+            </section>
+          )}
+
           {vdir?.is_public ? (
             <section
               data-testid="public-link-section"
@@ -238,6 +370,12 @@ export function SharingPage() {
                 <p data-testid="public-link-none" className="text-xs text-ios-secondary/70">
                   No public link — this vdir is not public. Turn on public access in the vdir's settings to get one.
                 </p>
+                {vdir.public_slug && (
+                  <p data-testid="public-link-reserved" className="text-xs text-ios-secondary/70">
+                    The public name <code>/apps/{vdir.public_slug}</code> is reserved and becomes active when this
+                    vdir is published.
+                  </p>
+                )}
               </section>
             )
           )}

@@ -3,13 +3,24 @@
 // by the preview dispatcher (non-media files) and the image viewer's
 // decode fallback (add-audio-player-image-viewer design D5).
 
-import { filesUrl, type LsEntry } from "../lib/filesApi";
+import { filesUrl, fileUrlFrom, type LsEntry } from "../lib/filesApi";
 import { formatModTime, formatSize } from "../lib/listing";
 import { DownloadIcon } from "./icons";
 import { entryVisual } from "./entryVisual";
 
-export function MetadataCard({ vdirId, path, entry }: { vdirId: string; path: string; entry: LsEntry }) {
+export function MetadataCard({
+  vdirId,
+  path,
+  entry,
+  fileBase,
+}: {
+  vdirId: string;
+  path: string;
+  entry: LsEntry;
+  fileBase?: string;
+}) {
   const visual = entryVisual(entry);
+  const downloadUrl = fileBase ? fileUrlFrom(fileBase, path) : filesUrl(vdirId, path);
   return (
     <div className="flex flex-1 flex-col items-center px-6 py-8">
       <div className="flex h-40 w-32 flex-col items-center justify-center rounded-xl border border-ios-separator bg-ios-card shadow-md">
@@ -37,7 +48,7 @@ export function MetadataCard({ vdirId, path, entry }: { vdirId: string; path: st
       </div>
 
       <a
-        href={filesUrl(vdirId, path)}
+        href={downloadUrl}
         download
         data-testid="preview-download"
         className="mt-8 flex w-full max-w-xs items-center justify-center gap-2 rounded-xl bg-ios-blue py-3.5 font-semibold text-white shadow-sm active:scale-95"

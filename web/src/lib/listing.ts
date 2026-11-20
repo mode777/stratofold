@@ -94,22 +94,36 @@ export function parentPath(path: string): string {
   return idx === -1 ? "" : path.slice(0, idx);
 }
 
-// browseUrl builds the SPA route for a vdir path, segment-encoded.
-export function browseUrl(vdirId: string, path: string): string {
+// encodedPath appends a virtual path to a route base, encoding each
+// segment once.
+function encodedPath(base: string, path: string): string {
   const segments = path
     .split("/")
     .filter((s) => s.length > 0)
     .map((s) => encodeURIComponent(s));
-  return `/v/${encodeURIComponent(vdirId)}${segments.length ? "/" + segments.join("/") : ""}`;
+  const root = base.endsWith("/") ? base.slice(0, -1) : base;
+  return `${root}${segments.length ? "/" + segments.join("/") : ""}`;
+}
+
+// browsePath builds the browse route under an arbitrary base — /v/<id>
+// for the signed-in routes, /apps/<alias> for pretty public URLs.
+export function browsePath(basePath: string, path: string): string {
+  return encodedPath(basePath, path);
+}
+
+// previewPath builds the pushed preview route under an arbitrary base.
+export function previewPath(basePath: string, path: string): string {
+  return encodedPath(`${basePath}/view`, path);
+}
+
+// browseUrl builds the SPA route for a vdir path, segment-encoded.
+export function browseUrl(vdirId: string, path: string): string {
+  return browsePath(`/v/${encodeURIComponent(vdirId)}`, path);
 }
 
 // previewUrl builds the pushed preview route for a non-media file.
 export function previewUrl(vdirId: string, path: string): string {
-  const segments = path
-    .split("/")
-    .filter((s) => s.length > 0)
-    .map((s) => encodeURIComponent(s));
-  return `/v/${encodeURIComponent(vdirId)}/view${segments.length ? "/" + segments.join("/") : ""}`;
+  return previewPath(`/v/${encodeURIComponent(vdirId)}`, path);
 }
 
 // decodeSplat turns a raw splat pathname tail into the virtual path,

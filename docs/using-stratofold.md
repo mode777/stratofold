@@ -38,6 +38,10 @@ are ordinary.
   by anyone with its link, no account needed. Public access is strictly
   read-only: uploads and changes always require a signed-in owner or
   editor ([sharing-access-control spec](../openspec/specs/sharing-access-control/spec.md)).
+- **Public name** — one optional, globally unique, lowercase name per
+  vdir (`my-public-folder`). While the vdir is public it is also
+  available at `/apps/my-public-folder`; the name is reserved while the
+  vdir is private ([public-urls spec](../openspec/specs/public-urls/spec.md)).
 
 ## Connecting an SSH host
 
@@ -61,7 +65,11 @@ Under **Settings → Vdirs**, create a vdir: pick a name, bind one of
 your own connections, and set the root path — it starts prefilled from
 the connection's remote directory and can point anywhere on that host
 the connection may read. Flip **public** if the vdir should be browsable
-by anyone with its link.
+by anyone with its link. On the sharing screen you can also claim a
+**public name** (lowercase letters, digits, and hyphens, 2–63 characters)
+for a memorable `/apps/<name>` address; the name is global to the
+instance and only one vdir can hold it
+([public-urls spec](../openspec/specs/public-urls/spec.md)).
 
 ## Browsing and files
 
@@ -210,10 +218,11 @@ by the grantee's exact registered email, as `viewer` or `editor`
 - You can change a share's role or delete it at any time; a removed
   share or changed role applies to the person's next request — no
   re-login needed on their side.
-- While a vdir is public, the sharing screen offers its plain link
-  (`/v/<vdir-id>`) with a copy action. The link carries no token:
-  revoking public access is the vdir's public toggle, and un-publishing
-  cuts anonymous access on the next request.
+- While a vdir is public, the sharing screen offers its public link with
+  a copy action: `/apps/<public-name>` when a name is registered,
+  otherwise `/v/<vdir-id>`. The link carries no token: revoking public
+  access is the vdir's public toggle, and un-publishing cuts anonymous
+  access on the next request (the name stays reserved for re-publishing).
 - While a vdir is public, any file in it also offers **Copy public
   link** in the browse view's context menu — a direct link to that one
   file's download, no surrounding folder needed.
@@ -269,10 +278,35 @@ viewer gets, with no write or management controls and no app
 destinations. If the vdir stops being public, the visitor's next action
 says so explicitly.
 
+- **Pretty public URLs.** When the owner registers a public name, the
+  folder is available at `/apps/<name>` in addition to `/v/<vdir-id>`.
+  Folder, breadcrumb, preview, and back navigation stay under the pretty
+  URL. Names are global across the instance; a name already taken by
+  another vdir is rejected with an "already taken" message.
+- **Reserved while private.** Registering a name does not publish the
+  vdir. The `/apps/<name>` URL is a `404` while the vdir is private;
+  un-publishing keeps the name reserved, and re-publishing restores the
+  URL. Releasing a name or deleting the vdir frees it immediately, so a
+  later owner can claim it and old links can point at different content;
+  register deliberately and keep the vdir public for as long as the link
+  matters.
+- **Direct file links.** `/apps/<name>/docs/report.pdf` streams the file
+  with the same Range, cache-validator, and resume behavior as `/files`.
+  A directory path (with a trailing slash) shows the browse view; a
+  directory without the slash redirects to it. Directories never fall
+  back to an `index.html` — link `/apps/<name>/index.html` explicitly
+  for that file.
+- **The `view` name is reserved at the folder root.** The in-app preview
+  uses `/apps/<name>/view/…`, so a remote folder literally named `view`
+  at the vdir root is reachable only through
+  `/files/<vdir-id>/view/…`; a nested `docs/view/…` folder works
+  normally.
+
 Every file's context menu also offers **Copy public link**, which puts
-that file's absolute `/files` URL on the clipboard. It carries no
-token: it downloads the file only while the vdir is public, exactly like
-the vdir's browse link.
+that file's absolute direct URL on the clipboard — the `/apps/<name>/…`
+form when a public name is registered, otherwise `/files/<vdir-id>/…`.
+It carries no token: it downloads the file only while the vdir is
+public, exactly like the vdir's browse link.
 
 ## Install as an app
 

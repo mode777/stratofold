@@ -9,34 +9,32 @@
 // opens in a new tab at /files.
 
 import { useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { ls, type ApiFailure, type LsEntry } from "../lib/filesApi";
 import { entryKind } from "../lib/entryKind";
-import { browseUrl, decodeSplat, parentPath } from "../lib/listing";
+import { browsePath, decodeSplat, parentPath } from "../lib/listing";
+import { useBrowseRoute } from "../lib/browseRoute";
 import { toApiFailure } from "../lib/records";
 import { FailureState, Spinner, UnavailableState } from "../components/Errors";
 import { MetadataCard } from "../components/MetadataCard";
-import { usePublicBrowseName } from "../components/PublicGate";
 import { ChevronLeftIcon } from "../components/icons";
 import { AudioPlayerPage } from "./AudioPlayerPage";
 import { ImageViewerPage } from "./ImageViewerPage";
 import { VideoPlayerPage } from "./VideoPlayerPage";
 
 export function PreviewPage() {
-  const { vdirId = "" } = useParams();
+  const { vdirId, basePath, fileBase, publicMode } = useBrowseRoute();
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const path = useMemo(() => {
-    const prefix = `/v/${vdirId}/view`;
+    const prefix = `${basePath}/view`;
     const raw = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : "";
     return decodeSplat(raw);
-  }, [pathname, vdirId]);
+  }, [pathname, basePath]);
 
-  // Public mode (design D3): anonymous previews render the same view
+  // Public mode (design D3/D7): public previews render the same view
   // but map every failure to the not-available state — the entry may
   // have vanished with the vdir's publicness.
-  const publicName = usePublicBrowseName();
-  const publicMode = publicName !== null;
 
   const dir = parentPath(path);
   const name = path.split("/").filter(Boolean).pop() ?? "";
@@ -78,7 +76,7 @@ export function PreviewPage() {
   // listing (deleted between fetch and render) is not-found.
   const entry = useMemo(() => listing?.find((e) => e.name === name) ?? null, [listing, name]);
 
-  const goBack = () => void navigate(browseUrl(vdirId, dir));
+  const goBack = () => void navigate(browsePath(basePath, dir));
 
   // The header stays across states (like BrowsePage's) — back must be
   // reachable even when the entry failed to load. pb-24 md:pb-0 keeps
@@ -128,13 +126,20 @@ export function PreviewPage() {
     <div data-testid="preview" className="flex min-h-dvh flex-col pb-24 md:pb-0">
       {header}
       {kind === "audio" ? (
-        <AudioPlayerPage vdirId={vdirId} path={path} entry={entry} listing={listing ?? []} />
+        <AudioPlayerPage vdirId={vdirId} basePath={basePath} path={path} entry={entry} listing={listing ?? []} />
       ) : kind === "image" ? (
-        <ImageViewerPage vdirId={vdirId} path={path} entry={entry} listing={listing ?? []} />
+        <ImageViewerPage
+          vdirId={vdirId}
+          basePath={basePath}
+          fileBase={fileBase}
+          path={path}
+          entry={entry}
+          listing={listing ?? []}
+        />
       ) : kind === "video" ? (
         <VideoPlayerPage vdirId={vdirId} path={path} entry={entry} />
       ) : (
-        <MetadataCard vdirId={vdirId} path={path} entry={entry} />
+        <MetadataCard vdirId={vdirId} fileBase={fileBase} path={path} entry={entry} />
       )}
     </div>
   );

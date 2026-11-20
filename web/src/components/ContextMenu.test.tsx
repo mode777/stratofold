@@ -108,6 +108,32 @@ describe("ContextMenu", () => {
     );
   });
 
+  it("downloads through the alias base", () => {
+    renderMenu("movie.mp4", {}, { fileBase: "/apps/pretty" });
+
+    expect(screen.getByTestId("action-download")).toHaveAttribute(
+      "href",
+      "/apps/pretty/folder/movie.mp4",
+    );
+    expect(screen.getByTestId("action-open-tab")).toHaveAttribute(
+      "href",
+      "/apps/pretty/folder/movie.mp4",
+    );
+  });
+
+  it("copies the alias URL while keeping the /files download base", async () => {
+    renderMenu("my notes.txt", {}, { isPublic: true, publicFileBase: "/apps/pretty" });
+
+    expect(screen.getByTestId("action-download")).toHaveAttribute(
+      "href",
+      "/files/v1/folder/my%20notes.txt",
+    );
+    await userEvent.setup().click(screen.getByTestId("action-copy-public-link"));
+    await expect(navigator.clipboard.readText()).resolves.toBe(
+      `${window.location.origin}/apps/pretty/folder/my%20notes.txt`,
+    );
+  });
+
   it("keeps the copy action for every viewer of a public vdir", () => {
     renderMenu("notes.txt", {}, { isPublic: true, canWrite: false });
     expect(screen.getByTestId("action-copy-public-link")).toBeInTheDocument();
