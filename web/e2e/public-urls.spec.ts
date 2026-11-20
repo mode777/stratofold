@@ -127,8 +127,15 @@ test.describe.serial("pretty public URLs", () => {
 
     const anon = await browser.newContext();
     const anonPage = await anon.newPage();
-    await anonPage.goto(`/apps/${SLUG}`);
-    await expect(anonPage.getByTestId("state-unavailable")).toBeVisible();
+    const gone = await anonPage.goto(`/apps/${SLUG}`);
+    // Production serves the alias route only while public, so the whole
+    // shell is a 404. The Vite dev server serves the shell and the SPA
+    // gate renders the explicit not-available state instead.
+    if (gone?.status() === 404) {
+      await expect(anonPage.getByTestId("breadcrumbs")).toHaveCount(0);
+    } else {
+      await expect(anonPage.getByTestId("state-unavailable")).toBeVisible();
+    }
     await expect(anonPage.getByLabel("Email")).toHaveCount(0);
 
     // Re-publish: the reserved name becomes active again.
@@ -147,8 +154,12 @@ test.describe.serial("pretty public URLs", () => {
     await expect(page.getByTestId("public-link")).toContainText("/v/");
     await expect(page.getByTestId("public-name-input")).toHaveValue("");
 
-    await anonPage.goto(`/apps/${SLUG}`);
-    await expect(anonPage.getByTestId("state-unavailable")).toBeVisible();
+    const released = await anonPage.goto(`/apps/${SLUG}`);
+    if (released?.status() === 404) {
+      await expect(anonPage.getByTestId("breadcrumbs")).toHaveCount(0);
+    } else {
+      await expect(anonPage.getByTestId("state-unavailable")).toBeVisible();
+    }
 
     await anon.close();
   });
